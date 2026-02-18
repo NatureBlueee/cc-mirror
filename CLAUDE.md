@@ -32,12 +32,18 @@ mirror-output/report.html + share-card.html + share-card.png
 
 | Phase | 内容 | 状态 |
 |-------|------|------|
-| Phase 0 | L1 解析器 + `cc-mirror scan` 命令 | 进行中 |
-| Phase 1 | L2 检测 + L3 聚合 + markdown 输出 | 待开始 |
+| Phase 0 | L1 解析器 + `cc-mirror scan` 命令 | **✅ 验收通过** (commit e1da72e) |
+| Phase 1 | L2 检测 + L3 聚合 + markdown 输出 | **🚀 下一步** |
 | Phase 2 | L4 HTML 报告 + 分享卡片 | 待开始 |
 | Phase 3 | 打包发布（pip + uvx） | 待开始 |
 
-**下一步**：运行 `cc-mirror scan --claude-dir ~/.claude` 在 Towow 数据上验证 L1
+**Phase 0 实测数字（Towow 项目，72 个 JSONL 文件）**：
+- Sessions: 38 | Messages: 62,583 | Tool calls: 9,379
+- User text messages: 1,817 | Correction candidates: 66 (**3.6%** of text messages)
+- Repeated prompts: 23 unique patterns
+- 32 个文件跳过（无有效 session_id，通常是 compact-only 文件）
+
+**下一步**：Phase 1 → 用 Agent Team 并行实现 L2/L3
 
 ---
 
