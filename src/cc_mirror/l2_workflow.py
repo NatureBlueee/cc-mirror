@@ -212,8 +212,8 @@ def _do_cluster(
 # ---------------------------------------------------------------------------
 
 def _get_api_key() -> str | None:
-    """从环境变量读取 API key（优先 ANTHROPIC_API_KEY，fallback TOWOW_ANTHROPIC_KEY）。"""
-    return os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("TOWOW_ANTHROPIC_KEY")
+    """从环境变量读取 API key（优先 ANTHROPIC_API_KEY，fallback TOWOW_ANTHROPIC_API_KEY）。"""
+    return os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("TOWOW_ANTHROPIC_API_KEY")
 
 
 def _analyze_cluster_with_sonnet(
@@ -237,7 +237,7 @@ def _analyze_cluster_with_sonnet(
 
     api_key = _get_api_key()
     if not api_key:
-        print("[l2_workflow] 未找到 ANTHROPIC_API_KEY / TOWOW_ANTHROPIC_KEY", file=sys.stderr)
+        print("[l2_workflow] 未找到 ANTHROPIC_API_KEY / TOWOW_ANTHROPIC_API_KEY", file=sys.stderr)
         return None
 
     # 构造 sequences 展示文本

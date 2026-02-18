@@ -38,7 +38,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 # L3a 用 Opus：生成规则是高价值任务，值得用最强模型
-_MODEL_OPUS = "claude-opus-4-5-20251001"
+_MODEL_OPUS = "claude-opus-4-6"
 
 # L3b/L3c 用 Sonnet：批量 Skill 建议，节省预算
 _MODEL_SONNET = "claude-sonnet-4-6"
@@ -66,8 +66,8 @@ _SONNET_MAX_TOKENS = 2048
 # ---------------------------------------------------------------------------
 
 def _get_api_key() -> str | None:
-    """从环境变量读取 API key（优先 ANTHROPIC_API_KEY，fallback TOWOW_ANTHROPIC_KEY）。"""
-    return os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("TOWOW_ANTHROPIC_KEY")
+    """从环境变量读取 API key（优先 ANTHROPIC_API_KEY，fallback TOWOW_ANTHROPIC_API_KEY）。"""
+    return os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("TOWOW_ANTHROPIC_API_KEY")
 
 
 def _calc_opus_cost(input_tokens: int, output_tokens: int) -> float:
@@ -186,7 +186,7 @@ def generate_rules(db: sqlite3.Connection, budget: "BudgetController") -> str:
     # 检查 API key
     api_key = _get_api_key()
     if not api_key:
-        print("[l3a] 未找到 ANTHROPIC_API_KEY / TOWOW_ANTHROPIC_KEY，跳过规则生成", file=sys.stderr)
+        print("[l3a] 未找到 ANTHROPIC_API_KEY / TOWOW_ANTHROPIC_API_KEY，跳过规则生成", file=sys.stderr)
         return ""
 
     try:
@@ -313,7 +313,7 @@ def generate_skill_suggestions(db: sqlite3.Connection, budget: "BudgetController
     # 检查 API key
     api_key = _get_api_key()
     if not api_key:
-        print("[l3b] 未找到 ANTHROPIC_API_KEY / TOWOW_ANTHROPIC_KEY，跳过 Skill 建议生成", file=sys.stderr)
+        print("[l3b] 未找到 ANTHROPIC_API_KEY / TOWOW_ANTHROPIC_API_KEY，跳过 Skill 建议生成", file=sys.stderr)
         return ""
 
     try:

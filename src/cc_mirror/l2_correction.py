@@ -296,13 +296,22 @@ async def _process_one(
             # 构造 prompt
             prompt = build_prompt(user_text, context_texts)
 
-            # 调用 LLM
+            # 调用 LLM（带 rate limit 重试）
             t_start = time.monotonic()
-            response = await client.messages.create(
-                model=_MODEL,
-                max_tokens=_MAX_TOKENS,
-                messages=[{"role": "user", "content": prompt}],
-            )
+            for _attempt in range(4):
+                try:
+                    response = await client.messages.create(
+                        model=_MODEL,
+                        max_tokens=_MAX_TOKENS,
+                        messages=[{"role": "user", "content": prompt}],
+                    )
+                    break
+                except Exception as _e:
+                    if "429" in str(_e) and _attempt < 3:
+                        wait = 15 * (2 ** _attempt)
+                        await asyncio.sleep(wait)
+                        continue
+                    raise
             duration_ms = int((time.monotonic() - t_start) * 1000)
 
             # 提取 token 数和成本

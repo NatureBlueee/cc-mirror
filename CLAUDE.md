@@ -33,9 +33,15 @@ mirror-output/report.html + share-card.html + share-card.png
 | Phase | 内容 | 状态 |
 |-------|------|------|
 | Phase 0 | L1 解析器 + `cc-mirror scan` 命令 | **✅ 验收通过** (commit e1da72e) |
-| Phase 1 | L2 检测 + L3 聚合 + markdown 输出 | **🚀 下一步** |
-| Phase 2 | L4 HTML 报告 + 分享卡片 | 待开始 |
+| Phase 1 | L2 检测 + L3 聚合 + markdown 输出 | **✅ 验收通过** (85/85 测试) |
+| Phase 2 | L4 HTML 报告 + 分享卡片 | **🚀 下一步** |
 | Phase 3 | 打包发布（pip + uvx） | 待开始 |
+
+**Phase 1 实测数字（Towow 项目，$0.86 成本）**：
+- Corrections confirmed: 2 / 66 candidates（rate 3% — 纠正不多但每条质量高）
+- Repeated prompts analyzed: 20 / 20（14 条有可操作建议）
+- Rules generated: **3 条 CLAUDE.md 规则**（工作流相关：批量操作需确认）
+- Skills suggested: 0（仅 1 聚类，通用调试模式，不值得封装为 Skill）
 
 **Phase 0 实测数字（Towow 项目，72 个 JSONL 文件）**：
 - Sessions: 38 | Messages: 62,583 | Tool calls: 9,379
