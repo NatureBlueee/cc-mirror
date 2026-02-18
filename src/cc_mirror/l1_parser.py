@@ -50,6 +50,20 @@ _REPEATED_PROMPT_MAX_LEN = 200
 # 重复提示检测：最少出现 session 数
 _REPEATED_PROMPT_MIN_SESSIONS = 3
 
+# 重复提示检测：系统注入消息前缀（CC 状态通知 / 工具输出回显，不是用户输入）
+_SYSTEM_MSG_PREFIXES: tuple[str, ...] = (
+    "[Request interrupted",
+    "<local-command-stdout>",
+    "<local-command-stderr>",
+    "<command-name>",
+    "<command-message>",
+    "<system-reminder>",
+    "<user-prompt-submit-hook>",
+)
+
+# 重复提示检测：最小有意义长度（过滤单字符 / 纯标点）
+_REPEATED_PROMPT_MIN_LEN = 4
+
 
 # ---------------------------------------------------------------------------
 # 纯函数工具
@@ -500,6 +514,19 @@ def _detect_repeated_prompts(db: sqlite3.Connection) -> int:
         text = (row["user_text"] or "").strip()
         if not text:
             continue
+
+        # 过滤 1：CC 系统注入消息（状态通知 / 工具输出回显）
+        if any(text.startswith(prefix) for prefix in _SYSTEM_MSG_PREFIXES):
+            continue
+
+        # 过滤 2：最小有意义长度
+        if len(text) < _REPEATED_PROMPT_MIN_LEN:
+            continue
+
+        # 过滤 3：纯会话填充词（复用纠正检测已有的集合）
+        if is_confirmation_only(text):
+            continue
+
         text_to_sessions[text].append((row["session_id"], row["timestamp"]))
 
     # 筛选：出现在 ≥3 个不同 session 中
