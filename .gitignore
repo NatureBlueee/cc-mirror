@@ -1,0 +1,61 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.pyd
+*.pyo
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+MANIFEST
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+*.coveragerc
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ---- 项目特定 ----
+
+# 用户数据库（本地生成，不提交）
+mirror.db
+*.db
+
+# 生成的报告（本地产物，不提交）
+mirror-output/
+
+# 测试 fixtures 中的真实 CC 数据（隐私数据，绝不提交）
+tests/fixtures/real_data/
+
+# JSONL 对话历史（用户隐私数据，绝不提交）
+*.jsonl

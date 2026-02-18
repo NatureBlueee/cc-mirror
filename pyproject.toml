@@ -1,0 +1,65 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "cc-mirror"
+version = "0.1.0"
+description = "从你的 Claude Code 历史中提取可自动化的模式"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+  {name = "Nature"},
+]
+keywords = ["claude", "claude-code", "ai", "analytics", "automation"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
+
+# 核心依赖：只用标准库（L1 阶段）
+# L2/L3 阶段加入 anthropic, jinja2, click
+dependencies = [
+  "click>=8.0",
+]
+
+[project.optional-dependencies]
+# L2/L3 分析阶段需要
+analyze = [
+  "anthropic>=0.40",
+]
+# L4 报告生成需要
+report = [
+  "jinja2>=3.0",
+]
+# PNG 截图（可选）
+screenshot = [
+  "playwright>=1.40",
+]
+# 所有功能
+all = [
+  "cc-mirror[analyze,report,screenshot]",
+]
+# 开发依赖
+dev = [
+  "pytest>=7.0",
+  "pytest-cov",
+]
+
+[project.scripts]
+cc-mirror = "cc_mirror.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/nature/cc-mirror"
+Repository = "https://github.com/nature/cc-mirror"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
