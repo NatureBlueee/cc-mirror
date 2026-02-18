@@ -68,9 +68,12 @@ def scan(claude_dir, output, project, verbose):
     click.echo(f"Sessions:             {stats['sessions']:,} (across {len(stats['projects'])} projects)")
     click.echo(f"Messages:             {stats['messages']:,}")
     click.echo(f"Tool calls:           {stats.get('tool_calls', 0):,}")
+    click.echo(f"User text messages:   {stats.get('user_text_messages', 0):,}")
     click.echo()
+    user_text_msgs = max(stats.get('user_text_messages', 1), 1)
+    correction_rate = stats['candidate_corrections'] / user_text_msgs * 100
     click.echo(f"Candidate corrections: {stats['candidate_corrections']:,} "
-               f"({stats['candidate_corrections'] / max(stats['messages'] // 2, 1) * 100:.1f}% of user messages)")
+               f"({correction_rate:.1f}% of user text messages)")
     click.echo(f"Repeated prompts:     {stats['repeated_prompts']:,} unique patterns")
     if stats.get('parse_errors', 0) > 0:
         click.echo(f"Parse errors:        {stats['parse_errors']:,} lines skipped", err=True)

@@ -600,6 +600,11 @@ def parse_all_sessions(
             "skipped_sessions": 0,
         }
 
+    # 如果传入的是 ~/.claude 根目录，自动切换到 projects/ 子目录
+    projects_subdir = claude_dir / "projects"
+    if projects_subdir.exists():
+        claude_dir = projects_subdir
+
     # 预加载已存在的 session_id 集合（增量更新：避免重复解析）
     existing_sessions: set[str] = set()
     try:
@@ -657,14 +662,26 @@ def parse_all_sessions(
             total_messages += result["messages"]
             total_errors += result["parse_errors"]
 
-    # ---- 候选纠正统计 ----
+    # ---- 候选纠正统计 + 工具调用统计 ----
     candidate_corrections = 0
+    total_tool_calls = 0
+    user_text_messages = 0
     try:
         cur = db.execute(
             "SELECT COUNT(*) FROM messages WHERE is_candidate_correction = 1"
         )
         row = cur.fetchone()
         candidate_corrections = row[0] if row else 0
+
+        cur = db.execute("SELECT COUNT(*) FROM tool_calls")
+        row = cur.fetchone()
+        total_tool_calls = row[0] if row else 0
+
+        cur = db.execute(
+            "SELECT COUNT(*) FROM messages WHERE user_text IS NOT NULL AND user_text != ''"
+        )
+        row = cur.fetchone()
+        user_text_messages = row[0] if row else 0
     except Exception as e:
         print(f"[l1] 统计候选纠正失败: {e}", file=sys.stderr)
 
@@ -685,6 +702,8 @@ def parse_all_sessions(
     return {
         "sessions": total_sessions,
         "messages": total_messages,
+        "tool_calls": total_tool_calls,
+        "user_text_messages": user_text_messages,
         "candidate_corrections": candidate_corrections,
         "repeated_prompts": repeated_prompts,
         "projects": processed_projects,
