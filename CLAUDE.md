@@ -36,6 +36,7 @@ mirror-output/report.html + share-card.html + share-card.png
 | Phase 1 | L2 检测 + L3 聚合 + markdown 输出 | **✅ 验收通过** (85/85 测试) |
 | Phase 2 | L4 HTML 报告 + 分享卡片 | **✅ 验收通过** (126/126 测试, commit d126674) |
 | Phase 3 | 打包发布（pip + uvx） | **✅ 验收通过** (commit b119416) |
+| LLM 后端 | claude CLI 优先，anthropic SDK 为 fallback | **✅ 完成** (v0.1.1, commit 8e7fc10) |
 
 **Phase 2 实测数字（Towow 项目，$1.08 总成本）**：
 - L3d synthesis: 综合叙事 300 字（"架构师+执行监督者"画像）
