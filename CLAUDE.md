@@ -34,22 +34,28 @@ mirror-output/report.html + share-card.html + share-card.png
 |-------|------|------|
 | Phase 0 | L1 解析器 + `cc-mirror scan` 命令 | **✅ 验收通过** (commit e1da72e) |
 | Phase 1 | L2 检测 + L3 聚合 + markdown 输出 | **✅ 验收通过** (85/85 测试) |
-| Phase 2 | L4 HTML 报告 + 分享卡片 | **🚀 下一步** |
-| Phase 3 | 打包发布（pip + uvx） | 待开始 |
+| Phase 2 | L4 HTML 报告 + 分享卡片 | **✅ 验收通过** (126/126 测试, commit d126674) |
+| Phase 3 | 打包发布（pip + uvx） | **🚀 下一步** |
 
-**Phase 1 实测数字（Towow 项目，$0.86 成本）**：
+**Phase 2 实测数字（Towow 项目，$1.08 总成本）**：
+- L3d synthesis: 综合叙事 300 字（"架构师+执行监督者"画像）
+- report.html: synthesis → 规则建议 → 重复提示 → 数据总览 → 纠正证据
+- share-card.html: 零敏感信息分享卡片（大数字 + 画像金句）
+- L1 噪音过滤: repeated prompts 23 → 2（系统消息 + 填充词已过滤）
+- 126/126 测试通过
+
+**Phase 1 实测数字（Towow 项目，$1.08 成本）**：
 - Corrections confirmed: 2 / 66 candidates（rate 3% — 纠正不多但每条质量高）
-- Repeated prompts analyzed: 20 / 20（14 条有可操作建议）
-- Rules generated: **3 条 CLAUDE.md 规则**（工作流相关：批量操作需确认）
+- Repeated prompts analyzed: 2 / 2（高信号：tech agent review x4, commit this x4）
+- Rules generated: **3 条 CLAUDE.md 规则**（工作流相关：批量操作需确认、状态报告必须引用原始输出）
 - Skills suggested: 0（仅 1 聚类，通用调试模式，不值得封装为 Skill）
 
 **Phase 0 实测数字（Towow 项目，72 个 JSONL 文件）**：
 - Sessions: 38 | Messages: 62,583 | Tool calls: 9,379
 - User text messages: 1,817 | Correction candidates: 66 (**3.6%** of text messages)
-- Repeated prompts: 23 unique patterns
 - 32 个文件跳过（无有效 session_id，通常是 compact-only 文件）
 
-**下一步**：Phase 1 → 用 Agent Team 并行实现 L2/L3
+**下一步**：Phase 3 — 打包发布（README + pip + uvx）
 
 ---
 
@@ -74,6 +80,11 @@ src/cc_mirror/
 tests/
   fixtures/            — 最小 JSONL 测试数据（不含真实数据）
   test_l1_parser.py    — L1 单元测试
+  test_l2_correction.py
+  test_l2_workflow.py
+  test_l2_repeated_prompts.py
+  test_l3_aggregator.py
+  test_l4.py           — L4 渲染 26 测试 [Phase 2]
 
 .claude/skills/
   cc-mirror-dev/SKILL.md   — 开发 skill（每 session 开始时加载）

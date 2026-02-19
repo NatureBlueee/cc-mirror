@@ -93,8 +93,8 @@ def scan(claude_dir, output, project, verbose):
               help="报告输出目录")
 @click.option("--budget", default=20.0, show_default=True,
               help="最大 LLM 成本（USD）")
-@click.option("--parallelism", default=20, show_default=True,
-              help="L2 并发数")
+@click.option("--parallelism", default=3, show_default=True,
+              help="L2 并发数（建议 3 以内避免限速）")
 @click.option("--project", default=None,
               help="只分析特定项目")
 @click.option("--skip-scan", is_flag=True,
@@ -215,11 +215,53 @@ def analyze(claude_dir, output, budget, parallelism, project, skip_scan, db_path
 
 
 @cli.command("suggest-rules")
-@click.option("--claude-dir", default="~/.claude", show_default=True)
-@click.option("--output", default="./suggested-rules.md", show_default=True)
-def suggest_rules(claude_dir, output):
-    """只输出 CLAUDE.md 规则建议。[Coming Soon - Phase 1]"""
-    click.echo("suggest-rules 命令还在开发中（Phase 1）。")
+@click.option("--claude-dir", default="~/.claude", show_default=True,
+              help="Claude Code 数据目录")
+@click.option("--output", default="./suggested-rules.md", show_default=True,
+              help="规则输出文件")
+@click.option("--budget", default=5.0, show_default=True,
+              help="最大 LLM 成本（USD）")
+@click.option("--db", "db_path", default="./mirror.db", show_default=True,
+              help="SQLite 数据库路径（若存在则复用）")
+def suggest_rules(claude_dir, output, budget, db_path):
+    """快速生成 CLAUDE.md 规则建议（L1 + L2 纠正 + L3 规则生成）。"""
+    from cc_mirror.db import get_or_create_db
+    from cc_mirror.budget import BudgetController
+    from cc_mirror.l1_parser import parse_all_sessions
+    from cc_mirror.l2_correction import run_l2_corrections
+    from cc_mirror.l3_aggregator import generate_rules
+
+    claude_path = Path(claude_dir).expanduser()
+    output_path = Path(output).expanduser()
+    db_file = Path(db_path).expanduser()
+
+    if not claude_path.exists():
+        click.echo(f"找不到 Claude 数据目录：{claude_path}", err=True)
+        raise click.Abort()
+
+    click.echo(f"CC Mirror suggest-rules — budget=${budget:.2f}")
+    click.echo()
+
+    db = get_or_create_db(db_file)
+    budget_ctrl = BudgetController(budget_usd=budget, db=db)
+
+    # L1
+    parse_all_sessions(claude_path, db)
+    click.echo("[L1] Scan...     done")
+
+    # L2 纠正检测（只需要 corrections）
+    import asyncio
+    asyncio.run(run_l2_corrections(db, budget_ctrl, parallelism=3))
+    click.echo("[L2] Corrections... done")
+
+    # L3 规则生成
+    rules_text = generate_rules(db, budget_ctrl)
+    output_path.write_text(rules_text, encoding="utf-8")
+
+    db.close()
+    click.echo()
+    click.echo(f"Rules saved to: {output_path}")
+    click.echo("Copy the rules into your CLAUDE.md.")
 
 
 def main():
