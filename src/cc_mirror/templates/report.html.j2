@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CC Mirror 报告</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #f8f9fb;
+      --surface: #ffffff;
+      --surface-alt: #f0f4f8;
+      --border: #e2e8f0;
+      --border-light: #edf2f7;
+      --text: #1a202c;
+      --text-muted: #718096;
+      --text-light: #a0aec0;
+      --accent: #4f46e5;
+      --accent-light: #eef2ff;
+      --accent-border: #c7d2fe;
+      --green: #059669;
+      --green-light: #ecfdf5;
+      --orange: #d97706;
+      --orange-light: #fffbeb;
+      --red: #dc2626;
+      --red-light: #fef2f2;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
+      --shadow: 0 4px 6px -1px rgba(0,0,0,.07), 0 2px 4px -1px rgba(0,0,0,.04);
+      --radius: 10px;
+      --radius-sm: 6px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      font-size: 14px;
+      line-height: 1.6;
+      color: var(--text);
+      background: var(--bg);
+      min-height: 100vh;
+    }
+
+    /* ---- Layout ---- */
+    .page-wrap {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 32px 20px 64px;
+    }
+
+    /* ---- Header ---- */
+    .header {
+      text-align: center;
+      padding: 40px 24px 32px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-sm);
+      margin-bottom: 24px;
+    }
+    .header h1 {
+      font-size: 26px;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: -0.3px;
+      margin-bottom: 16px;
+    }
+    .header h1 span {
+      color: var(--accent);
+    }
+    .stat-row {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 8px 20px;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+    .stat-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: var(--surface-alt);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 4px 12px;
+      font-size: 12.5px;
+    }
+    .stat-chip strong {
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    /* ---- Section ---- */
+    .section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-sm);
+      margin-bottom: 20px;
+      overflow: hidden;
+    }
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border-light);
+      background: var(--surface-alt);
+    }
+    .section-icon {
+      width: 28px;
+      height: 28px;
+      border-radius: 7px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+    .icon-purple { background: var(--accent-light); color: var(--accent); }
+    .icon-green  { background: var(--green-light);  color: var(--green);  }
+    .icon-orange { background: var(--orange-light); color: var(--orange); }
+    .icon-gray   { background: var(--surface-alt);  color: var(--text-muted); border: 1px solid var(--border); }
+
+    .section-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .section-subtitle {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-left: auto;
+    }
+    .section-body {
+      padding: 20px;
+    }
+
+    /* ---- Rules block ---- */
+    .rules-container {
+      position: relative;
+    }
+    .rules-toolbar {
+      display: flex;
+      justify-content: flex-end;
+      margin-bottom: 10px;
+    }
+    .copy-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius-sm);
+      padding: 6px 14px;
+      font-size: 12.5px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background .15s, transform .1s;
+      font-family: inherit;
+    }
+    .copy-btn:hover  { background: #4338ca; }
+    .copy-btn:active { transform: scale(.97); }
+    .copy-btn.copied { background: var(--green); }
+    .rules-content {
+      background: var(--surface-alt);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 16px;
+      font-family: "SFMono-Regular", "Fira Code", "Fira Mono", Menlo, Consolas, monospace;
+      font-size: 12.5px;
+      line-height: 1.7;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: var(--text);
+      max-height: 420px;
+      overflow-y: auto;
+    }
+    .empty-hint {
+      color: var(--text-muted);
+      font-style: italic;
+      font-size: 13px;
+      text-align: center;
+      padding: 24px 0;
+    }
+
+    /* ---- Prompt cards ---- */
+    .prompt-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .prompt-card {
+      background: var(--surface-alt);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 14px 16px;
+    }
+    .prompt-card-text {
+      font-size: 13px;
+      color: var(--text);
+      margin-bottom: 8px;
+      font-style: italic;
+    }
+    .prompt-card-meta {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 11.5px;
+      font-weight: 500;
+    }
+    .badge-count  { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
+    .badge-loc    { background: var(--accent-light); color: var(--accent); }
+    .prompt-card-suggestion {
+      font-size: 12.5px;
+      color: var(--text);
+      background: var(--surface);
+      border-left: 3px solid var(--accent);
+      padding: 8px 10px;
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    }
+    .prompt-card-suggestion strong {
+      color: var(--text-muted);
+      font-size: 11.5px;
+      text-transform: uppercase;
+      letter-spacing: .4px;
+      display: block;
+      margin-bottom: 3px;
+    }
+
+    /* ---- Correction items ---- */
+    .correction-list {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .correction-item {
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+    }
+    .correction-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      background: var(--surface-alt);
+      border-bottom: 1px solid var(--border-light);
+    }
+    .correction-type-badge {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 10px;
+      text-transform: uppercase;
+      letter-spacing: .4px;
+    }
+    .type-style    { background: #ede9fe; color: #6d28d9; }
+    .type-scope    { background: #fce7f3; color: #be185d; }
+    .type-approach { background: #fef3c7; color: #92400e; }
+    .type-factual  { background: #dbeafe; color: #1e40af; }
+    .type-other    { background: #f1f5f9; color: #475569; }
+    .correction-conf {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      margin-left: auto;
+    }
+    .correction-body {
+      padding: 12px 14px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    @media (max-width: 600px) {
+      .correction-body { grid-template-columns: 1fr; }
+    }
+    .correction-col label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: .4px;
+      display: block;
+      margin-bottom: 4px;
+    }
+    .correction-col p {
+      font-size: 13px;
+      color: var(--text);
+    }
+    .correction-col.wanted label { color: var(--green); }
+    .correction-col.wanted p    { color: var(--text); }
+
+    /* ---- Data overview table ---- */
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    .data-table th {
+      text-align: left;
+      padding: 8px 12px;
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: .4px;
+      border-bottom: 2px solid var(--border);
+      background: var(--surface-alt);
+    }
+    .data-table td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border-light);
+      color: var(--text);
+    }
+    .data-table tr:last-child td { border-bottom: none; }
+    .data-table td:last-child { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .data-table tr:hover td { background: var(--surface-alt); }
+
+    /* ---- Cluster list ---- */
+    .cluster-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .cluster-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      background: var(--surface-alt);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-size: 13px;
+    }
+    .cluster-count {
+      flex-shrink: 0;
+      background: var(--accent-light);
+      color: var(--accent);
+      font-size: 11.5px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 10px;
+      white-space: nowrap;
+    }
+
+    /* ---- Footer ---- */
+    .footer {
+      text-align: center;
+      margin-top: 40px;
+      color: var(--text-light);
+      font-size: 12px;
+    }
+    .footer a { color: var(--text-light); text-decoration: none; }
+
+    /* ---- Part divider ---- */
+    .part-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin: 28px 0 12px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .part-label::after {
+      content: "";
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    /* ---- Skills block ---- */
+    .skills-content {
+      background: var(--surface-alt);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 16px;
+      font-size: 13px;
+      line-height: 1.7;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: var(--text);
+      max-height: 360px;
+      overflow-y: auto;
+    }
+
+    /* ---- Synthesis block ---- */
+    .synthesis-block {
+      background: var(--surface);
+      border: 1px solid var(--accent-border);
+      border-left: 4px solid var(--accent);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-sm);
+      margin-bottom: 20px;
+      overflow: hidden;
+    }
+    .synthesis-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--accent-border);
+      background: var(--accent-light);
+    }
+    .synthesis-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .8px;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+    .synthesis-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+      margin-left: 4px;
+    }
+    .synthesis-body {
+      padding: 20px 24px;
+    }
+    .synthesis-text {
+      font-size: 14px;
+      line-height: 1.8;
+      color: var(--text);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+  </style>
+</head>
+<body>
+<div class="page-wrap">
+
+  <!-- ===== Header ===== -->
+  <div class="header">
+    <h1>CC <span>Mirror</span> 报告</h1>
+    <div class="stat-row">
+      <span class="stat-chip"><strong>{{ sessions | format_number }}</strong> sessions</span>
+      <span class="stat-chip"><strong>{{ messages | format_number }}</strong> 条消息</span>
+      <span class="stat-chip"><strong>{{ tool_calls | format_number }}</strong> 次工具调用</span>
+      <span class="stat-chip"><strong>{{ corrections_confirmed }}</strong> 条确认纠正</span>
+      <span class="stat-chip">分析成本 <strong>{{ cost_usd | format_cost }}</strong></span>
+    </div>
+  </div>
+
+  <!-- ===== 综合洞察（如果有）===== -->
+  {% if synthesis %}
+  <div class="synthesis-block">
+    <div class="synthesis-header">
+      <span class="synthesis-label">综合洞察</span>
+      <span class="synthesis-title">基于全局数据的系统性分析</span>
+    </div>
+    <div class="synthesis-body">
+      <p class="synthesis-text">{{ synthesis }}</p>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ===== Part 1: 可执行产出 ===== -->
+  <div class="part-label">Part 1 &nbsp;可执行产出</div>
+
+  <!-- CLAUDE.md 规则建议 -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-icon icon-purple">&#9998;</div>
+      <span class="section-title">CLAUDE.md 规则建议</span>
+      <span class="section-subtitle">可直接粘贴到你的 CLAUDE.md</span>
+    </div>
+    <div class="section-body">
+      {% if rules_md %}
+      <div class="rules-container">
+        <div class="rules-toolbar">
+          <button class="copy-btn" id="copyRulesBtn" onclick="copyRules()">
+            &#128203; 复制全部
+          </button>
+        </div>
+        <pre class="rules-content" id="rulesText">{{ rules_md }}</pre>
+      </div>
+      {% else %}
+      <p class="empty-hint">暂无规则建议（需要更多纠正行为数据）</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Skill 建议 -->
+  {% if skills_md %}
+  <div class="section">
+    <div class="section-header">
+      <div class="section-icon icon-purple">&#9673;</div>
+      <span class="section-title">Skill 建议</span>
+      <span class="section-subtitle">可封装为 .claude/skills/</span>
+    </div>
+    <div class="section-body">
+      <div class="rules-container">
+        <div class="rules-toolbar">
+          <button class="copy-btn" id="copySkillsBtn" onclick="copySkills()">
+            &#128203; 复制全部
+          </button>
+        </div>
+        <pre class="skills-content" id="skillsText">{{ skills_md }}</pre>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- 重复工作流 -->
+  {% if repeated_prompts %}
+  <div class="section">
+    <div class="section-header">
+      <div class="section-icon icon-orange">&#8635;</div>
+      <span class="section-title">重复提示词</span>
+      <span class="section-subtitle">{{ repeated_prompts | length }} 个可优化项</span>
+    </div>
+    <div class="section-body">
+      <div class="prompt-list">
+        {% for rp in repeated_prompts %}
+        <div class="prompt-card">
+          <p class="prompt-card-text">"{{ rp.text }}{% if rp.text | length >= 120 %}…{% endif %}"</p>
+          <div class="prompt-card-meta">
+            <span class="badge badge-count">出现 {{ rp.occurrences }} 次</span>
+            {% if rp.location %}
+            <span class="badge badge-loc">建议位置：{{ rp.location }}</span>
+            {% endif %}
+          </div>
+          {% if rp.suggestion %}
+          <div class="prompt-card-suggestion">
+            <strong>行动建议</strong>
+            {{ rp.suggestion }}
+          </div>
+          {% elif rp.reason %}
+          <div class="prompt-card-suggestion">
+            <strong>分析</strong>
+            {{ rp.reason }}
+          </div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ===== Part 2: 行为证据 ===== -->
+  <div class="part-label">Part 2 &nbsp;行为证据</div>
+
+  <div class="section">
+    <div class="section-header">
+      <div class="section-icon icon-green">&#10003;</div>
+      <span class="section-title">纠正行为详情</span>
+      <span class="section-subtitle">
+        {% if corrections %}{{ corrections | length }} 条已确认{% else %}无纠正记录{% endif %}
+      </span>
+    </div>
+    <div class="section-body">
+      {% if corrections %}
+      <div class="correction-list">
+        {% for c in corrections %}
+        <div class="correction-item">
+          <div class="correction-head">
+            <span class="correction-type-badge type-{{ c.correction_type }}">{{ c.correction_type }}</span>
+            <span class="correction-conf">置信度 {{ "%.0f" | format(c.confidence * 100) }}%</span>
+          </div>
+          <div class="correction-body">
+            <div class="correction-col">
+              <label>CC 做了</label>
+              <p>{{ c.cc_did }}</p>
+            </div>
+            <div class="correction-col wanted">
+              <label>你想要的</label>
+              <p>{{ c.user_wanted }}</p>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="empty-hint">未检测到纠正行为（这可能是好事 &mdash; 说明 CC 一次就对了）</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- ===== Part 3: 数据概览 ===== -->
+  <div class="part-label">Part 3 &nbsp;数据概览</div>
+
+  <div class="section">
+    <div class="section-header">
+      <div class="section-icon icon-gray">&#8801;</div>
+      <span class="section-title">量化摘要</span>
+    </div>
+    <div class="section-body">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>指标</th>
+            <th>数量</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Sessions</td><td>{{ sessions | format_number }}</td></tr>
+          <tr><td>消息总数</td><td>{{ messages | format_number }}</td></tr>
+          <tr><td>工具调用次数</td><td>{{ tool_calls | format_number }}</td></tr>
+          <tr><td>纠正候选（L1 粗筛）</td><td>{{ correction_candidates | format_number }}</td></tr>
+          <tr><td>确认纠正（L2 精筛）</td><td>{{ corrections_confirmed | format_number }}</td></tr>
+          <tr><td>分析 LLM 调用次数</td><td>{{ llm_calls | format_number }}</td></tr>
+          <tr><td>分析总成本</td><td>{{ cost_usd | format_cost }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {% if workflow_clusters %}
+  <div class="section">
+    <div class="section-header">
+      <div class="section-icon icon-orange">&#9741;</div>
+      <span class="section-title">工作流聚类</span>
+      <span class="section-subtitle">{{ workflow_clusters | length }} 个模式</span>
+    </div>
+    <div class="section-body">
+      <div class="cluster-list">
+        {% for wf in workflow_clusters %}
+        <div class="cluster-item">
+          <span class="cluster-count">{{ wf.session_count }} sessions</span>
+          <span>{{ wf.description }}</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ===== Footer ===== -->
+  <div class="footer">
+    Generated by CC Mirror &nbsp;&middot;&nbsp; {{ generated_at[:10] }}
+  </div>
+
+</div><!-- /.page-wrap -->
+
+<script>
+  // 复制规则内容到剪贴板
+  function copyText(elementId, buttonId) {
+    var text = document.getElementById(elementId).textContent;
+    var btn = document.getElementById(buttonId);
+    var original = btn.textContent;
+
+    // 尝试现代 API
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function() {
+        btn.textContent = '已复制!';
+        btn.classList.add('copied');
+        setTimeout(function() {
+          btn.textContent = original;
+          btn.classList.remove('copied');
+        }, 2000);
+      }).catch(function() {
+        fallbackCopy(text, btn, original);
+      });
+    } else {
+      fallbackCopy(text, btn, original);
+    }
+  }
+
+  // fallback：execCommand
+  function fallbackCopy(text, btn, original) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    ta.style.top = '-9999px';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    try {
+      document.execCommand('copy');
+      btn.textContent = '已复制!';
+      btn.classList.add('copied');
+      setTimeout(function() {
+        btn.textContent = original;
+        btn.classList.remove('copied');
+      }, 2000);
+    } catch (e) {
+      btn.textContent = '复制失败，请手动选择';
+      setTimeout(function() { btn.textContent = original; }, 3000);
+    }
+    document.body.removeChild(ta);
+  }
+
+  function copyRules()  { copyText('rulesText', 'copyRulesBtn'); }
+  function copySkills() { copyText('skillsText', 'copySkillsBtn'); }
+</script>
+</body>
+</html>

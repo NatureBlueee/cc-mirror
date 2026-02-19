@@ -184,6 +184,11 @@ def analyze(claude_dir, output, budget, parallelism, project, skip_scan, db_path
         f"report saved to {output_path}"
     )
 
+    # ---- L4: 渲染 HTML 报告 ----
+    from cc_mirror.l4_renderer import render_report
+    l4_stats = render_report(db, budget_ctrl, output_path)
+    click.echo(f"[L4] Rendering...     HTML report generated")
+
     db.close()
 
     # ---- 最终输出 ----
@@ -200,6 +205,12 @@ def analyze(claude_dir, output, budget, parallelism, project, skip_scan, db_path
     click.echo("Output files:")
     for fpath in l3_stats.get("output_files", []):
         click.echo(f"  {fpath}")
+    if l4_stats.get("report_path"):
+        click.echo(f"Report:               {l4_stats['report_path']}")
+    if l4_stats.get("share_card_path"):
+        click.echo(f"Share card:           {l4_stats['share_card_path']}")
+    if l4_stats.get("png_path"):
+        click.echo(f"Share card PNG:       {l4_stats['png_path']}")
     click.echo()
 
 

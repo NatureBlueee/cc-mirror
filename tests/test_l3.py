@@ -27,6 +27,7 @@ from cc_mirror.l3_aggregator import (
     generate_rules,
     generate_skill_suggestions,
     generate_summary,
+    generate_synthesis,
     run_l3,
 )
 
@@ -238,13 +239,14 @@ class TestRunL3EmptyDb:
     """run_l3 在空 DB 上应正常运行，只生成 summary，不报错。"""
 
     def test_returns_dict_with_expected_keys(self, tmp_db, budget, output_dir):
-        """返回值应包含所有预期键。"""
+        """返回值应包含所有预期键（包括新增的 synthesis）。"""
         result = run_l3(tmp_db, budget, output_dir)
         assert "rules_generated" in result
         assert "skills_suggested" in result
         assert "repeated_prompts_addressed" in result
         assert "output_files" in result
         assert "llm_calls" in result
+        assert "synthesis" in result
 
     def test_output_dir_created_automatically(self, tmp_db, budget, output_dir):
         """output_dir 不存在时应自动创建。"""
@@ -252,10 +254,10 @@ class TestRunL3EmptyDb:
         run_l3(tmp_db, budget, output_dir)
         assert output_dir.exists()
 
-    def test_three_files_generated(self, tmp_db, budget, output_dir):
-        """即使 DB 为空，也应生成三个输出文件。"""
+    def test_four_files_generated(self, tmp_db, budget, output_dir):
+        """即使 DB 为空，也应生成四个输出文件（加上 synthesis.md）。"""
         result = run_l3(tmp_db, budget, output_dir)
-        assert len(result["output_files"]) == 3
+        assert len(result["output_files"]) == 4
 
     def test_all_output_files_exist(self, tmp_db, budget, output_dir):
         """三个输出文件都应实际存在于磁盘。"""
@@ -525,13 +527,14 @@ class TestRunL3FileContents:
     """验证 run_l3 生成的文件名和内容结构。"""
 
     def test_output_filenames_are_fixed(self, tmp_db, budget, output_dir):
-        """输出文件名应固定（不含时间戳）。"""
+        """输出文件名应固定（不含时间戳），包括新增的 synthesis.md。"""
         run_l3(tmp_db, budget, output_dir)
 
         expected_files = {
             "suggested-rules.md",
             "suggested-skills.md",
             "analysis-summary.md",
+            "synthesis.md",
         }
         actual_files = {f.name for f in output_dir.iterdir() if f.is_file()}
         assert expected_files == actual_files
@@ -561,3 +564,149 @@ class TestRunL3FileContents:
         result = run_l3(tmp_db, budget, output_dir)
         for fpath in result["output_files"]:
             assert Path(fpath).is_absolute(), f"路径应为绝对路径：{fpath}"
+
+    def test_synthesis_file_created(self, tmp_db, budget, output_dir):
+        """synthesis.md 应存在于 output_dir 中。"""
+        run_l3(tmp_db, budget, output_dir)
+        synthesis_path = output_dir / "synthesis.md"
+        assert synthesis_path.exists(), "synthesis.md 文件不存在"
+
+    def test_synthesis_key_in_result(self, tmp_db, budget, output_dir):
+        """返回值中 synthesis 键应为字符串类型。"""
+        result = run_l3(tmp_db, budget, output_dir)
+        assert isinstance(result["synthesis"], str)
+
+
+# ---------------------------------------------------------------------------
+# 测试 6：generate_synthesis() mock LLM 调用
+# ---------------------------------------------------------------------------
+
+class TestGenerateSynthesisMocked:
+    """mock Anthropic 客户端，测试 generate_synthesis 有数据时的完整流程。"""
+
+    def _make_mock_response(self, text: str = "这位工程师频繁使用 CC 完成代码重构任务，整体工具调用强度偏高。"):
+        """构造一个模拟 Anthropic API 响应对象。"""
+        usage = MagicMock()
+        usage.input_tokens = 600
+        usage.output_tokens = 150
+
+        content_item = MagicMock()
+        content_item.text = text
+
+        response = MagicMock()
+        response.usage = usage
+        response.content = [content_item]
+        return response
+
+    def test_no_api_key_returns_empty_string(self, tmp_db, budget):
+        """没有 API key 时，返回空字符串而不是 raise。"""
+        import os
+        env_backup = {}
+        for key in ("ANTHROPIC_API_KEY", "TOWOW_ANTHROPIC_API_KEY"):
+            env_backup[key] = os.environ.pop(key, None)
+
+        try:
+            result = generate_synthesis(tmp_db, budget)
+            assert result == ""
+        finally:
+            for key, val in env_backup.items():
+                if val is not None:
+                    os.environ[key] = val
+
+    def test_empty_db_calls_opus_and_returns_text(self, tmp_db, budget):
+        """空 DB 时也应尝试调用 Opus（数据全为 0），并返回文本。"""
+        mock_response = self._make_mock_response()
+
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test-key"}):
+            with patch("cc_mirror.l3_aggregator.anthropic") as mock_anthropic_module:
+                mock_client = MagicMock()
+                mock_anthropic_module.Anthropic.return_value = mock_client
+                mock_client.messages.create.return_value = mock_response
+
+                result = generate_synthesis(tmp_db, budget)
+
+        assert len(result) > 0
+        assert "工程师" in result
+
+    def test_uses_opus_model(self, tmp_db, budget):
+        """generate_synthesis 应使用 Opus 模型。"""
+        mock_response = self._make_mock_response()
+
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test-key"}):
+            with patch("cc_mirror.l3_aggregator.anthropic") as mock_anthropic_module:
+                mock_client = MagicMock()
+                mock_anthropic_module.Anthropic.return_value = mock_client
+                mock_client.messages.create.return_value = mock_response
+
+                generate_synthesis(tmp_db, budget)
+
+        call_kwargs = mock_client.messages.create.call_args
+        model_used = call_kwargs.kwargs.get("model")
+        assert model_used is not None
+        assert "opus" in model_used.lower()
+
+    def test_call_recorded_in_budget(self, tmp_db, budget):
+        """Opus 调用应被记录到 llm_calls 表。"""
+        mock_response = self._make_mock_response()
+
+        before_count = tmp_db.execute(
+            "SELECT COUNT(*) FROM llm_calls"
+        ).fetchone()[0]
+
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test-key"}):
+            with patch("cc_mirror.l3_aggregator.anthropic") as mock_anthropic_module:
+                mock_client = MagicMock()
+                mock_anthropic_module.Anthropic.return_value = mock_client
+                mock_client.messages.create.return_value = mock_response
+
+                generate_synthesis(tmp_db, budget)
+
+        after_count = tmp_db.execute(
+            "SELECT COUNT(*) FROM llm_calls"
+        ).fetchone()[0]
+
+        assert after_count == before_count + 1
+
+    def test_api_failure_returns_empty_string(self, tmp_db, budget):
+        """API 调用失败时返回空字符串，不崩溃。"""
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test-key"}):
+            with patch("cc_mirror.l3_aggregator.anthropic") as mock_anthropic_module:
+                mock_client = MagicMock()
+                mock_anthropic_module.Anthropic.return_value = mock_client
+                mock_client.messages.create.side_effect = Exception("network error")
+
+                result = generate_synthesis(tmp_db, budget)
+
+        assert result == ""
+
+    def test_synthesis_written_to_file_by_run_l3(self, tmp_db, budget, output_dir):
+        """run_l3 应将 synthesis 写入 synthesis.md 文件。"""
+        mock_response = self._make_mock_response("这是综合洞察分析内容。")
+
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test-key"}):
+            with patch("cc_mirror.l3_aggregator.anthropic") as mock_anthropic_module:
+                mock_client = MagicMock()
+                mock_anthropic_module.Anthropic.return_value = mock_client
+                mock_client.messages.create.return_value = mock_response
+
+                result = run_l3(tmp_db, budget, output_dir)
+
+        synthesis_path = output_dir / "synthesis.md"
+        assert synthesis_path.exists()
+        content = synthesis_path.read_text(encoding="utf-8")
+        assert "这是综合洞察分析内容" in content
+        assert result["synthesis"] == "这是综合洞察分析内容。"
+
+    def test_synthesis_empty_on_stop_budget(self, tmp_db, output_dir):
+        """budget 超 80% 时，synthesis 应为空字符串。"""
+        budget_ctrl = BudgetController(budget_usd=10.0, db=tmp_db)
+        budget_ctrl.record_call("L2", "claude-sonnet-4-6", 1000, 100, 9.0)
+
+        result = run_l3(tmp_db, budget_ctrl, output_dir)
+
+        assert result["synthesis"] == ""
+        # synthesis.md 应存在但包含占位说明
+        synthesis_path = output_dir / "synthesis.md"
+        assert synthesis_path.exists()
+        content = synthesis_path.read_text(encoding="utf-8")
+        assert "未生成" in content

@@ -6,12 +6,14 @@ l3_aggregator.py — CC Mirror L3 聚合层
   - 用 Opus 生成 CLAUDE.md 规则建议
   - 用 Sonnet 生成 Skill 建议文档
   - 生成纯数字概览摘要（无 LLM）
-  - 将三个文件写入 output_dir/
+  - 用 Opus 生成全局综合洞察叙事（L3d）
+  - 将四个文件写入 output_dir/
 
 产出文件：
   suggested-rules.md   — CLAUDE.md 规则建议
   suggested-skills.md  — Skill 建议
   analysis-summary.md  — 数字仪表盘 + 重复提示建议
+  synthesis.md         — 全局综合洞察（Opus 一次调用）
 """
 
 from __future__ import annotations
@@ -56,6 +58,9 @@ _MIN_CONFIDENCE = 0.7
 
 # Opus 输出 token 上限（规则文档不需要太长）
 _OPUS_MAX_TOKENS = 2048
+
+# Opus 综合洞察输出 token 上限（300 字以内，约 600 tokens 足够）
+_OPUS_SYNTHESIS_MAX_TOKENS = 800
 
 # Sonnet 输出 token 上限（Skill 建议批量）
 _SONNET_MAX_TOKENS = 2048
@@ -537,6 +542,178 @@ def generate_summary(db: sqlite3.Connection, budget: "BudgetController") -> str:
 
 
 # ---------------------------------------------------------------------------
+# L3d: generate_synthesis — 全局综合洞察（一次 Opus 调用）
+# ---------------------------------------------------------------------------
+
+def generate_synthesis(db: sqlite3.Connection, budget: "BudgetController") -> str:
+    """
+    一次 Opus 调用，综合所有分析数据，生成系统性洞察叙事（300字以内）。
+
+    输入给 Opus 的是全局视图：会话总量、时间跨度、纠正分布、重复工作流、工具使用模式。
+    输出是一段有上下文的综合分析，不是条目列表。
+
+    预算不足或 API 失败时返回空字符串（不崩溃）。
+    """
+    # ---- 检查前置条件 ----
+    if anthropic is None:
+        print("[l3d] anthropic 包未安装，跳过综合洞察", file=sys.stderr)
+        return ""
+
+    api_key = _get_api_key()
+    if not api_key:
+        print("[l3d] 未找到 ANTHROPIC_API_KEY / TOWOW_ANTHROPIC_API_KEY，跳过综合洞察", file=sys.stderr)
+        return ""
+
+    # ---- 收集全局数据 ----
+    try:
+        # 基础数字
+        sessions = db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] or 0
+        messages = db.execute("SELECT COUNT(*) FROM messages").fetchone()[0] or 0
+        tool_calls = db.execute("SELECT COUNT(*) FROM tool_calls").fetchone()[0] or 0
+        user_msgs = db.execute(
+            "SELECT COUNT(*) FROM messages WHERE type = 'user'"
+        ).fetchone()[0] or 0
+
+        # 时间跨度
+        date_row = db.execute(
+            "SELECT MIN(start_time), MAX(start_time) FROM sessions"
+        ).fetchone()
+        if date_row and date_row[0] and date_row[1]:
+            date_min = str(date_row[0])[:10]
+            date_max = str(date_row[1])[:10]
+            date_range = f"{date_min} 到 {date_max}"
+        else:
+            date_range = "未知时间跨度"
+
+        # 工具调用强度
+        tool_ratio = tool_calls / max(user_msgs, 1)
+
+        # 纠正数据
+        candidates = db.execute(
+            "SELECT COUNT(*) FROM messages WHERE is_candidate_correction = 1"
+        ).fetchone()[0] or 0
+        confirmed = db.execute("SELECT COUNT(*) FROM corrections").fetchone()[0] or 0
+        candidate_rate = candidates / max(user_msgs, 1) * 100
+
+        # 纠正详情（取 cc_did + user_wanted，confidence >= 0.7）
+        corr_rows = db.execute(
+            """
+            SELECT cc_did, user_wanted, correction_type
+            FROM corrections
+            WHERE confidence >= 0.7
+            ORDER BY confidence DESC
+            LIMIT 20
+            """
+        ).fetchall()
+
+        if corr_rows:
+            corr_lines = []
+            for row in corr_rows:
+                ctype = row["correction_type"] or "other"
+                cc_did = (row["cc_did"] or "").strip()
+                user_wanted = (row["user_wanted"] or "").strip()
+                corr_lines.append(f"  [{ctype}] CC做了：{cc_did} → 用户想要：{user_wanted}")
+            corrections_detail = "\n".join(corr_lines)
+        else:
+            corrections_detail = "  （无高置信度纠正记录）"
+
+        # 重复工作流（取 canonical_text + occurrences）
+        rp_rows = db.execute(
+            "SELECT canonical_text, occurrences FROM repeated_prompts ORDER BY occurrences DESC LIMIT 10"
+        ).fetchall()
+
+        if rp_rows:
+            rp_lines = []
+            for row in rp_rows:
+                text = (row["canonical_text"] or "")[:80]
+                cnt = row["occurrences"]
+                rp_lines.append(f"  （{cnt}次）{text}")
+            repeated_prompts_detail = "\n".join(rp_lines)
+        else:
+            repeated_prompts_detail = "  （无重复提示记录）"
+
+        # 工具使用聚类描述
+        cluster_rows = db.execute(
+            "SELECT description, session_count FROM workflow_clusters ORDER BY session_count DESC LIMIT 8"
+        ).fetchall()
+
+        if cluster_rows:
+            cl_lines = []
+            for row in cluster_rows:
+                desc = row["description"] or "(无描述)"
+                cnt = row["session_count"]
+                cl_lines.append(f"  （{cnt}个session）{desc}")
+            workflow_clusters_detail = "\n".join(cl_lines)
+        else:
+            workflow_clusters_detail = "  （无工作流聚类记录）"
+
+    except Exception as e:
+        print(f"[l3d] 收集数据失败: {e}", file=sys.stderr)
+        return ""
+
+    # ---- 构造 prompt ----
+    prompt = f"""你在分析一位工程师的 Claude Code 工作历史，提供系统性洞察。
+
+=== 工作规模 ===
+- 共 {sessions} 个会话，涵盖约 {date_range}
+- {messages:,} 条消息，{tool_calls:,} 次工具调用
+- 用户主动输入 {user_msgs:,} 条（工具调用强度：每条用户消息对应 {tool_ratio:.1f} 次工具调用）
+
+=== 纠正行为分析 ===
+- 粗筛候选：{candidates} 条（{candidate_rate:.1f}% 的用户输入）
+- 精筛确认：{confirmed} 条
+{corrections_detail}
+
+=== 重复工作流 ===
+{repeated_prompts_detail}
+
+=== 工具使用模式 ===
+{workflow_clusters_detail}
+
+请从整体视角分析（不要列条目，写连贯的分析）：
+这位工程师的 Claude Code 使用呈现了什么系统性特征？CC 在什么情境下容易出问题？重复的工作流说明了什么习惯或痛点？基于全局数据，最值得关注的一个改进方向是什么？
+
+用中文，300字以内，言之有物，有具体依据。"""
+
+    print(f"[l3d] 准备调用 Opus 生成综合洞察（sessions={sessions}, corrections={confirmed}）", file=sys.stderr)
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+
+        t0 = time.time()
+        response = client.messages.create(
+            model=_MODEL_OPUS,
+            max_tokens=_OPUS_SYNTHESIS_MAX_TOKENS,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        duration_ms = int((time.time() - t0) * 1000)
+
+        usage = response.usage
+        input_tokens = usage.input_tokens
+        output_tokens = usage.output_tokens
+        cost_usd = _calc_opus_cost(input_tokens, output_tokens)
+
+        budget.record_call(
+            stage="L3",
+            model=_MODEL_OPUS,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost_usd=cost_usd,
+            duration_ms=duration_ms,
+        )
+
+        raw_text = response.content[0].text if response.content else ""
+        result = _strip_code_fence(raw_text)
+
+        print(f"[l3d] Opus 调用完成（cost=${cost_usd:.4f}，{input_tokens}→{output_tokens} tokens）", file=sys.stderr)
+        return result
+
+    except Exception as e:
+        print(f"[l3d] Opus API 调用失败: {e}", file=sys.stderr)
+        return ""
+
+
+# ---------------------------------------------------------------------------
 # 主入口: run_l3
 # ---------------------------------------------------------------------------
 
@@ -565,6 +742,7 @@ def run_l3(
             "repeated_prompts_addressed": int,  # repeated_prompts 条数
             "output_files": list[str],          # 生成的文件绝对路径
             "llm_calls": int,
+            "synthesis": str,                  # 综合洞察文本（空字符串 = 未生成）
         }
     """
     # 确保输出目录存在（不存在则自动创建）
@@ -577,6 +755,7 @@ def run_l3(
         "repeated_prompts_addressed": 0,
         "output_files": [],
         "llm_calls": 0,
+        "synthesis": "",
     }
 
     # 检查预算策略
@@ -634,6 +813,27 @@ def run_l3(
     except Exception as e:
         print(f"[l3] 写入 {skills_path} 失败: {e}", file=sys.stderr)
 
+    # ---- L3d: 综合洞察（预算允许时才调用 LLM）----
+    synthesis_md = ""
+    if strategy != "stop":
+        synthesis_md = generate_synthesis(db, budget)
+
+    stats["synthesis"] = synthesis_md
+
+    # 写入 synthesis.md（即使为空也写，内容为空时写占位说明）
+    synthesis_path = output_dir / "synthesis.md"
+    if synthesis_md:
+        synthesis_content = synthesis_md + "\n"
+    else:
+        synthesis_content = "_综合洞察未生成（数据不足或预算受限）。_\n"
+
+    try:
+        synthesis_path.write_text(synthesis_content, encoding="utf-8")
+        stats["output_files"].append(str(synthesis_path.absolute()))
+        print(f"[l3] 综合洞察已写入：{synthesis_path}", file=sys.stderr)
+    except Exception as e:
+        print(f"[l3] 写入 {synthesis_path} 失败: {e}", file=sys.stderr)
+
     # ---- L3c: 摘要报告（无 LLM，始终生成）----
     summary_md = generate_summary(db, budget)
 
@@ -664,6 +864,7 @@ def run_l3(
     print(
         f"[l3] 完成：rules={stats['rules_generated']}, "
         f"skills={stats['skills_suggested']}, "
+        f"synthesis={'yes' if stats['synthesis'] else 'no'}, "
         f"llm_calls={stats['llm_calls']}, "
         f"files={len(stats['output_files'])}",
         file=sys.stderr,

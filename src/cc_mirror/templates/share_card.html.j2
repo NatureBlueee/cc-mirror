@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1200">
+  <title>CC Mirror Share Card</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      width: 1200px;
+      height: 630px;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      background: linear-gradient(135deg, #f0f4ff 0%, #fafbff 40%, #f8fafc 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .card {
+      width: 1120px;
+      height: 550px;
+      background: #ffffff;
+      border-radius: 20px;
+      box-shadow: 0 8px 32px rgba(79, 70, 229, .10), 0 2px 8px rgba(0,0,0,.06);
+      display: flex;
+      flex-direction: column;
+      padding: 56px 64px 44px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* 左上装饰 */
+    .card::before {
+      content: "";
+      position: absolute;
+      top: -60px;
+      left: -60px;
+      width: 220px;
+      height: 220px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, rgba(79,70,229,.08) 0%, rgba(99,102,241,.04) 100%);
+    }
+    /* 右下装饰 */
+    .card::after {
+      content: "";
+      position: absolute;
+      bottom: -80px;
+      right: -40px;
+      width: 280px;
+      height: 280px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, rgba(79,70,229,.05) 0%, rgba(167,139,250,.08) 100%);
+    }
+
+    .brand {
+      font-size: 15px;
+      font-weight: 700;
+      color: #4f46e5;
+      letter-spacing: -.2px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 32px;
+      position: relative;
+      z-index: 1;
+    }
+    .brand-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #4f46e5;
+    }
+
+    .headline {
+      font-size: 32px;
+      font-weight: 700;
+      color: #1a202c;
+      letter-spacing: -.5px;
+      line-height: 1.25;
+      margin-bottom: 8px;
+      position: relative;
+      z-index: 1;
+    }
+    .subline {
+      font-size: 16px;
+      color: #718096;
+      margin-bottom: 48px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .stats-row {
+      display: flex;
+      gap: 24px;
+      flex: 1;
+      align-items: flex-start;
+      position: relative;
+      z-index: 1;
+    }
+
+    .stat-block {
+      flex: 1;
+      background: #f8f9fb;
+      border: 1px solid #e8ecf3;
+      border-radius: 14px;
+      padding: 28px 24px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .stat-block.accent {
+      background: linear-gradient(135deg, #eef2ff 0%, #f5f3ff 100%);
+      border-color: #c7d2fe;
+    }
+
+    .stat-number {
+      font-size: 52px;
+      font-weight: 800;
+      color: #1a202c;
+      line-height: 1;
+      letter-spacing: -2px;
+      font-variant-numeric: tabular-nums;
+    }
+    .stat-block.accent .stat-number {
+      color: #4f46e5;
+    }
+    .stat-label {
+      font-size: 13.5px;
+      color: #718096;
+      font-weight: 500;
+      margin-top: 4px;
+    }
+    .stat-block.accent .stat-label {
+      color: #6366f1;
+    }
+
+    .footer-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 32px;
+      padding-top: 20px;
+      border-top: 1px solid #edf2f7;
+      position: relative;
+      z-index: 1;
+    }
+    .footer-left {
+      font-size: 13px;
+      color: #a0aec0;
+    }
+    .footer-right {
+      font-size: 13px;
+      color: #a0aec0;
+      font-weight: 500;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand">
+      <span class="brand-dot"></span>
+      CC Mirror
+    </div>
+
+    <div class="headline">你的 Claude Code 使用报告</div>
+    <div class="subline">从历史会话中提取的行为洞察与可执行建议</div>
+
+    <div class="stats-row">
+      <div class="stat-block">
+        <span class="stat-number">{{ "%s" | format(sessions) }}</span>
+        <span class="stat-label">Sessions 分析</span>
+      </div>
+
+      <div class="stat-block">
+        <span class="stat-number">
+          {%- if messages >= 10000 -%}
+            {{ "%.1f" | format(messages / 1000) }}k
+          {%- else -%}
+            {{ messages }}
+          {%- endif -%}
+        </span>
+        <span class="stat-label">条消息记录</span>
+      </div>
+
+      <div class="stat-block accent">
+        <span class="stat-number">{{ corrections_confirmed }}</span>
+        <span class="stat-label">条纠正行为已识别</span>
+      </div>
+
+      <div class="stat-block">
+        <span class="stat-number">{{ tool_calls | string | replace(",", "") if tool_calls < 10000 else ("%.1f" | format(tool_calls / 1000) + "k") }}</span>
+        <span class="stat-label">次工具调用</span>
+      </div>
+    </div>
+
+    <div class="footer-bar">
+      <span class="footer-left">{{ generated_at[:10] }}</span>
+      <span class="footer-right">Generated by CC Mirror</span>
+    </div>
+  </div>
+</body>
+</html>
