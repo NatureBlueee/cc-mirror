@@ -14,7 +14,7 @@ import sqlite3
 import sys
 import types
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -320,21 +320,7 @@ class TestRunL3EmptyDb:
 # ---------------------------------------------------------------------------
 
 class TestGenerateRulesMocked:
-    """mock Anthropic 客户端，测试 generate_rules 有数据时的完整流程。"""
-
-    def _make_mock_response(self, text: str = "## 代码风格规则\n- 使用 camelCase\n- 避免魔法数字"):
-        """构造一个模拟 Anthropic API 响应对象。"""
-        usage = MagicMock()
-        usage.input_tokens = 500
-        usage.output_tokens = 100
-
-        content_item = MagicMock()
-        content_item.text = text
-
-        response = MagicMock()
-        response.usage = usage
-        response.content = [content_item]
-        return response
+    """mock call_llm，测试 generate_rules 有数据时的完整流程。"""
 
     def test_no_corrections_returns_empty_string(self, tmp_db, budget):
         """没有符合条件的 corrections 时，直接返回空字符串，不调用 LLM。"""
@@ -354,41 +340,29 @@ class TestGenerateRulesMocked:
         assert result == ""
 
     def test_valid_correction_calls_opus_and_returns_markdown(self, tmp_db, budget):
-        """有有效 correction 时，应调用 Opus 并返回 markdown 内容。"""
+        """有有效 correction 时，应调用 LLM 并返回 markdown 内容。"""
         _insert_correction(tmp_db, "sess-001", confidence=0.9, is_generalizable=True)
 
-        mock_response = self._make_mock_response(
-            "## 代码风格规则\n- 使用 camelCase\n\n## 工作流规则\n- 提交前运行测试"
-        )
+        mock_text = "## 代码风格规则\n- 使用 camelCase\n\n## 工作流规则\n- 提交前运行测试"
 
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test-key"}):
-            with patch("cc_mirror.l3_aggregator.anthropic") as mock_anthropic_module:
-                mock_client = MagicMock()
-                mock_anthropic_module.Anthropic.return_value = mock_client
-                mock_client.messages.create.return_value = mock_response
-
-                result = generate_rules(tmp_db, budget)
+        with patch("cc_mirror.l3_aggregator.call_llm", new_callable=AsyncMock) as mock_call_llm:
+            mock_call_llm.return_value = (mock_text, 0.001)
+            result = generate_rules(tmp_db, budget)
 
         assert "代码风格规则" in result
         assert "camelCase" in result
 
     def test_opus_call_recorded_in_budget(self, tmp_db, budget):
-        """Opus 调用应被记录到 llm_calls 表。"""
+        """LLM 调用应被记录到 llm_calls 表。"""
         _insert_correction(tmp_db, "sess-001", confidence=0.9, is_generalizable=True)
-
-        mock_response = self._make_mock_response()
 
         before_count = tmp_db.execute(
             "SELECT COUNT(*) FROM llm_calls"
         ).fetchone()[0]
 
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test-key"}):
-            with patch("cc_mirror.l3_aggregator.anthropic") as mock_anthropic_module:
-                mock_client = MagicMock()
-                mock_anthropic_module.Anthropic.return_value = mock_client
-                mock_client.messages.create.return_value = mock_response
-
-                generate_rules(tmp_db, budget)
+        with patch("cc_mirror.l3_aggregator.call_llm", new_callable=AsyncMock) as mock_call_llm:
+            mock_call_llm.return_value = ("## 代码风格规则\n- 使用 camelCase", 0.001)
+            generate_rules(tmp_db, budget)
 
         after_count = tmp_db.execute(
             "SELECT COUNT(*) FROM llm_calls"
@@ -397,46 +371,28 @@ class TestGenerateRulesMocked:
         assert after_count == before_count + 1, "应有一次 LLM 调用被记录"
 
     def test_opus_model_used_for_rules(self, tmp_db, budget):
-        """generate_rules 应使用 Opus 模型（不是 Sonnet）。"""
+        """generate_rules 应使用 opus model 参数（不是 sonnet）。"""
         _insert_correction(tmp_db, "sess-001", confidence=0.9, is_generalizable=True)
 
-        mock_response = self._make_mock_response()
+        with patch("cc_mirror.l3_aggregator.call_llm", new_callable=AsyncMock) as mock_call_llm:
+            mock_call_llm.return_value = ("## 代码风格规则\n- 规则1", 0.001)
+            generate_rules(tmp_db, budget)
 
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test-key"}):
-            with patch("cc_mirror.l3_aggregator.anthropic") as mock_anthropic_module:
-                mock_client = MagicMock()
-                mock_anthropic_module.Anthropic.return_value = mock_client
-                mock_client.messages.create.return_value = mock_response
-
-                generate_rules(tmp_db, budget)
-
-        # 检查 messages.create 被调用时的 model 参数
-        call_kwargs = mock_client.messages.create.call_args
-        # 支持位置参数或关键字参数
-        model_used = call_kwargs.kwargs.get("model") or call_kwargs.args[0] if call_kwargs.args else None
-        if model_used is None:
-            model_used = call_kwargs[1].get("model")
+        # 检查 call_llm 被调用时的 model 参数
+        call_kwargs = mock_call_llm.call_args
+        model_used = call_kwargs.kwargs.get("model") or (call_kwargs.args[1] if len(call_kwargs.args) > 1 else None)
         assert model_used is not None
-        assert "opus" in model_used.lower() or "claude-opus" in model_used
+        assert "opus" in model_used.lower()
 
-    def test_no_api_key_returns_empty_string(self, tmp_db, budget):
-        """没有 API key 时，应返回空字符串而不是 raise。"""
+    def test_llm_failure_returns_empty_string(self, tmp_db, budget):
+        """LLM 调用失败时，应返回空字符串而不是 raise。"""
         _insert_correction(tmp_db, "sess-001", confidence=0.9, is_generalizable=True)
 
-        # 确保环境变量不存在
-        import os
-        env_backup = {}
-        for key in ("ANTHROPIC_API_KEY", "TOWOW_ANTHROPIC_KEY"):
-            env_backup[key] = os.environ.pop(key, None)
-
-        try:
+        with patch("cc_mirror.l3_aggregator.call_llm", new_callable=AsyncMock) as mock_call_llm:
+            mock_call_llm.side_effect = RuntimeError("LLM 调用失败")
             result = generate_rules(tmp_db, budget)
-            assert result == ""
-        finally:
-            # 恢复环境变量
-            for key, val in env_backup.items():
-                if val is not None:
-                    os.environ[key] = val
+
+        assert result == ""
 
     def test_multiple_correction_types_grouped(self, tmp_db, budget):
         """多种类型的 correction 应被正确分组传入 prompt。"""
@@ -444,25 +400,18 @@ class TestGenerateRulesMocked:
         _insert_correction(tmp_db, "sess-002", correction_type="scope",  confidence=0.8)
 
         # 用 capture 记录 prompt 内容
-        captured_prompt = []
+        captured_prompts = []
 
-        mock_response = self._make_mock_response("## 代码风格规则\n- 规则1")
+        async def fake_call_llm(prompt, system=None, model="sonnet"):
+            captured_prompts.append(prompt)
+            return ("## 代码风格规则\n- 规则1", 0.001)
 
-        def fake_create(**kwargs):
-            captured_prompt.append(kwargs.get("messages", []))
-            return mock_response
-
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test-key"}):
-            with patch("cc_mirror.l3_aggregator.anthropic") as mock_anthropic_module:
-                mock_client = MagicMock()
-                mock_anthropic_module.Anthropic.return_value = mock_client
-                mock_client.messages.create.side_effect = fake_create
-
-                generate_rules(tmp_db, budget)
+        with patch("cc_mirror.l3_aggregator.call_llm", side_effect=fake_call_llm):
+            generate_rules(tmp_db, budget)
 
         # prompt 应包含两种类型
-        assert len(captured_prompt) == 1
-        prompt_text = captured_prompt[0][0]["content"]
+        assert len(captured_prompts) == 1
+        prompt_text = captured_prompts[0]
         assert "style" in prompt_text
         assert "scope" in prompt_text
 
@@ -472,20 +421,7 @@ class TestGenerateRulesMocked:
 # ---------------------------------------------------------------------------
 
 class TestGenerateSkillSuggestionsMocked:
-    """mock Anthropic 客户端，测试 generate_skill_suggestions 有数据时的完整流程。"""
-
-    def _make_mock_response(self, text: str = "## /git-commit-workflow\n**触发场景**：提交代码\n**工具序列**：Read → Edit → Bash"):
-        usage = MagicMock()
-        usage.input_tokens = 300
-        usage.output_tokens = 150
-
-        content_item = MagicMock()
-        content_item.text = text
-
-        response = MagicMock()
-        response.usage = usage
-        response.content = [content_item]
-        return response
+    """mock call_llm，测试 generate_skill_suggestions 有数据时的完整流程。"""
 
     def test_no_clusters_returns_empty_string(self, tmp_db, budget):
         """没有 Skill 候选聚类时返回空字符串。"""
@@ -499,21 +435,17 @@ class TestGenerateSkillSuggestionsMocked:
         assert result == ""
 
     def test_skill_candidate_calls_sonnet_and_returns_markdown(self, tmp_db, budget):
-        """有 Skill 候选时，应调用 Sonnet 并返回 markdown 内容。"""
+        """有 Skill 候选时，应调用 LLM 并返回 markdown 内容。"""
         _insert_workflow_cluster(tmp_db, is_skill_candidate=True)
 
-        mock_response = self._make_mock_response(
+        mock_text = (
             "## /git-commit-workflow\n**触发场景**：提交代码\n**工具序列**：Read → Edit → Bash\n"
             "**建议步骤**：\n1. 读取文件\n2. 编辑\n3. 提交"
         )
 
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test-key"}):
-            with patch("cc_mirror.l3_aggregator.anthropic") as mock_anthropic_module:
-                mock_client = MagicMock()
-                mock_anthropic_module.Anthropic.return_value = mock_client
-                mock_client.messages.create.return_value = mock_response
-
-                result = generate_skill_suggestions(tmp_db, budget)
+        with patch("cc_mirror.l3_aggregator.call_llm", new_callable=AsyncMock) as mock_call_llm:
+            mock_call_llm.return_value = (mock_text, 0.0005)
+            result = generate_skill_suggestions(tmp_db, budget)
 
         assert len(result) > 0
         assert "git-commit-workflow" in result
@@ -582,84 +514,46 @@ class TestRunL3FileContents:
 # ---------------------------------------------------------------------------
 
 class TestGenerateSynthesisMocked:
-    """mock Anthropic 客户端，测试 generate_synthesis 有数据时的完整流程。"""
+    """mock call_llm，测试 generate_synthesis 有数据时的完整流程。"""
 
-    def _make_mock_response(self, text: str = "这位工程师频繁使用 CC 完成代码重构任务，整体工具调用强度偏高。"):
-        """构造一个模拟 Anthropic API 响应对象。"""
-        usage = MagicMock()
-        usage.input_tokens = 600
-        usage.output_tokens = 150
-
-        content_item = MagicMock()
-        content_item.text = text
-
-        response = MagicMock()
-        response.usage = usage
-        response.content = [content_item]
-        return response
-
-    def test_no_api_key_returns_empty_string(self, tmp_db, budget):
-        """没有 API key 时，返回空字符串而不是 raise。"""
-        import os
-        env_backup = {}
-        for key in ("ANTHROPIC_API_KEY", "TOWOW_ANTHROPIC_API_KEY"):
-            env_backup[key] = os.environ.pop(key, None)
-
-        try:
+    def test_llm_failure_returns_empty_string(self, tmp_db, budget):
+        """LLM 调用失败时，返回空字符串而不是 raise。"""
+        with patch("cc_mirror.l3_aggregator.call_llm", new_callable=AsyncMock) as mock_call_llm:
+            mock_call_llm.side_effect = RuntimeError("调用失败")
             result = generate_synthesis(tmp_db, budget)
-            assert result == ""
-        finally:
-            for key, val in env_backup.items():
-                if val is not None:
-                    os.environ[key] = val
+        assert result == ""
 
     def test_empty_db_calls_opus_and_returns_text(self, tmp_db, budget):
-        """空 DB 时也应尝试调用 Opus（数据全为 0），并返回文本。"""
-        mock_response = self._make_mock_response()
+        """空 DB 时也应尝试调用 LLM（数据全为 0），并返回文本。"""
+        mock_text = "这位工程师频繁使用 CC 完成代码重构任务，整体工具调用强度偏高。"
 
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test-key"}):
-            with patch("cc_mirror.l3_aggregator.anthropic") as mock_anthropic_module:
-                mock_client = MagicMock()
-                mock_anthropic_module.Anthropic.return_value = mock_client
-                mock_client.messages.create.return_value = mock_response
-
-                result = generate_synthesis(tmp_db, budget)
+        with patch("cc_mirror.l3_aggregator.call_llm", new_callable=AsyncMock) as mock_call_llm:
+            mock_call_llm.return_value = (mock_text, 0.002)
+            result = generate_synthesis(tmp_db, budget)
 
         assert len(result) > 0
         assert "工程师" in result
 
     def test_uses_opus_model(self, tmp_db, budget):
-        """generate_synthesis 应使用 Opus 模型。"""
-        mock_response = self._make_mock_response()
+        """generate_synthesis 应使用 opus model 参数。"""
+        with patch("cc_mirror.l3_aggregator.call_llm", new_callable=AsyncMock) as mock_call_llm:
+            mock_call_llm.return_value = ("洞察文本", 0.002)
+            generate_synthesis(tmp_db, budget)
 
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test-key"}):
-            with patch("cc_mirror.l3_aggregator.anthropic") as mock_anthropic_module:
-                mock_client = MagicMock()
-                mock_anthropic_module.Anthropic.return_value = mock_client
-                mock_client.messages.create.return_value = mock_response
-
-                generate_synthesis(tmp_db, budget)
-
-        call_kwargs = mock_client.messages.create.call_args
-        model_used = call_kwargs.kwargs.get("model")
+        call_kwargs = mock_call_llm.call_args
+        model_used = call_kwargs.kwargs.get("model") or (call_kwargs.args[1] if len(call_kwargs.args) > 1 else None)
         assert model_used is not None
         assert "opus" in model_used.lower()
 
     def test_call_recorded_in_budget(self, tmp_db, budget):
-        """Opus 调用应被记录到 llm_calls 表。"""
-        mock_response = self._make_mock_response()
-
+        """LLM 调用应被记录到 llm_calls 表。"""
         before_count = tmp_db.execute(
             "SELECT COUNT(*) FROM llm_calls"
         ).fetchone()[0]
 
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test-key"}):
-            with patch("cc_mirror.l3_aggregator.anthropic") as mock_anthropic_module:
-                mock_client = MagicMock()
-                mock_anthropic_module.Anthropic.return_value = mock_client
-                mock_client.messages.create.return_value = mock_response
-
-                generate_synthesis(tmp_db, budget)
+        with patch("cc_mirror.l3_aggregator.call_llm", new_callable=AsyncMock) as mock_call_llm:
+            mock_call_llm.return_value = ("洞察文本", 0.002)
+            generate_synthesis(tmp_db, budget)
 
         after_count = tmp_db.execute(
             "SELECT COUNT(*) FROM llm_calls"
@@ -668,28 +562,18 @@ class TestGenerateSynthesisMocked:
         assert after_count == before_count + 1
 
     def test_api_failure_returns_empty_string(self, tmp_db, budget):
-        """API 调用失败时返回空字符串，不崩溃。"""
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test-key"}):
-            with patch("cc_mirror.l3_aggregator.anthropic") as mock_anthropic_module:
-                mock_client = MagicMock()
-                mock_anthropic_module.Anthropic.return_value = mock_client
-                mock_client.messages.create.side_effect = Exception("network error")
-
-                result = generate_synthesis(tmp_db, budget)
+        """LLM 调用失败时返回空字符串，不崩溃。"""
+        with patch("cc_mirror.l3_aggregator.call_llm", new_callable=AsyncMock) as mock_call_llm:
+            mock_call_llm.side_effect = Exception("network error")
+            result = generate_synthesis(tmp_db, budget)
 
         assert result == ""
 
     def test_synthesis_written_to_file_by_run_l3(self, tmp_db, budget, output_dir):
         """run_l3 应将 synthesis 写入 synthesis.md 文件。"""
-        mock_response = self._make_mock_response("这是综合洞察分析内容。")
-
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test-key"}):
-            with patch("cc_mirror.l3_aggregator.anthropic") as mock_anthropic_module:
-                mock_client = MagicMock()
-                mock_anthropic_module.Anthropic.return_value = mock_client
-                mock_client.messages.create.return_value = mock_response
-
-                result = run_l3(tmp_db, budget, output_dir)
+        with patch("cc_mirror.l3_aggregator.call_llm", new_callable=AsyncMock) as mock_call_llm:
+            mock_call_llm.return_value = ("这是综合洞察分析内容。", 0.002)
+            result = run_l3(tmp_db, budget, output_dir)
 
         synthesis_path = output_dir / "synthesis.md"
         assert synthesis_path.exists()

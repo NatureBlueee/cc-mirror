@@ -13,8 +13,8 @@ L2 阶段：有 LLM 调用（记录到 llm_calls 表）。
 
 from __future__ import annotations
 
+import asyncio
 import json
-import os
 import sqlite3
 import sys
 import time
@@ -24,16 +24,14 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from cc_mirror.budget import BudgetController
 
+from cc_mirror.llm import call_llm
+
 # ---------------------------------------------------------------------------
 # 常量
 # ---------------------------------------------------------------------------
 
-# 分析用的 Sonnet 模型
-_MODEL = "claude-sonnet-4-6"
-
-# Sonnet 定价（每百万 token，美元）
-_PRICE_INPUT_PER_M = 3.0
-_PRICE_OUTPUT_PER_M = 15.0
+# 分析用的模型（传给 call_llm 的 model 参数）
+_MODEL = "sonnet"
 
 # 每个聚类最多取几个 session 的序列展示给 Sonnet
 _MAX_SEQUENCES_PER_CLUSTER = 5
@@ -211,17 +209,12 @@ def _do_cluster(
 # LLM 调用
 # ---------------------------------------------------------------------------
 
-def _get_api_key() -> str | None:
-    """从环境变量读取 API key（优先 ANTHROPIC_API_KEY，fallback TOWOW_ANTHROPIC_API_KEY）。"""
-    return os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("TOWOW_ANTHROPIC_API_KEY")
-
-
 def _analyze_cluster_with_sonnet(
     cluster_sequences: list[list[str]],
     budget: "BudgetController",
 ) -> dict | None:
     """
-    调用 Sonnet 分析一个工作流聚类的任务类型和 Skill 建议。
+    调用 LLM 分析一个工作流聚类的任务类型和 Skill 建议。
 
     Args:
         cluster_sequences: 聚类内若干 session 的工具序列（最多 5 个）
@@ -233,11 +226,6 @@ def _analyze_cluster_with_sonnet(
     strategy = budget.get_strategy()
     if strategy == "stop":
         print("[l2_workflow] 预算耗尽，跳过 Sonnet 分析", file=sys.stderr)
-        return None
-
-    api_key = _get_api_key()
-    if not api_key:
-        print("[l2_workflow] 未找到 ANTHROPIC_API_KEY / TOWOW_ANTHROPIC_API_KEY", file=sys.stderr)
         return None
 
     # 构造 sequences 展示文本
@@ -264,38 +252,22 @@ def _analyze_cluster_with_sonnet(
 }}"""
 
     try:
-        import anthropic
-        client = anthropic.Anthropic(api_key=api_key)
-
         t0 = time.time()
-        response = client.messages.create(
-            model=_MODEL,
-            max_tokens=512,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        raw_text, cost_usd = asyncio.run(call_llm(prompt, model=_MODEL))
         duration_ms = int((time.time() - t0) * 1000)
 
-        # 提取 token 使用量
-        usage = response.usage
-        input_tokens = usage.input_tokens
-        output_tokens = usage.output_tokens
-        cost_usd = (
-            input_tokens * _PRICE_INPUT_PER_M / 1_000_000
-            + output_tokens * _PRICE_OUTPUT_PER_M / 1_000_000
-        )
-
-        # 记录调用
+        # 记录调用（token 数由 CLI 路径省略，填 0 作为占位）
         budget.record_call(
             stage="L2",
             model=_MODEL,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
+            input_tokens=0,
+            output_tokens=0,
             cost_usd=cost_usd,
             duration_ms=duration_ms,
         )
 
         # 解析响应
-        raw_text = response.content[0].text.strip()
+        raw_text = raw_text.strip()
         # 清理可能的 markdown 代码块标记
         if raw_text.startswith("```"):
             lines = raw_text.split("\n")
@@ -305,10 +277,10 @@ def _analyze_cluster_with_sonnet(
         return result
 
     except json.JSONDecodeError as e:
-        print(f"[l2_workflow] Sonnet 响应 JSON 解析失败: {e}", file=sys.stderr)
+        print(f"[l2_workflow] LLM 响应 JSON 解析失败: {e}", file=sys.stderr)
         return None
     except Exception as e:
-        print(f"[l2_workflow] Sonnet API 调用失败: {e}", file=sys.stderr)
+        print(f"[l2_workflow] LLM 调用失败: {e}", file=sys.stderr)
         return None
 
 

@@ -14,7 +14,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 # 确保 src 在路径中（不依赖 pip install）
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -163,15 +163,7 @@ class TestLcsSimilarity(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestRunL2WorkflowSmoke(unittest.TestCase):
-    """smoke test：不实际调用 Anthropic API，验证函数不崩溃且写入正确。"""
-
-    def _make_mock_anthropic_response(self, analysis_text: str):
-        """构造一个 mock Anthropic Messages response 对象。"""
-        mock_response = MagicMock()
-        mock_response.content = [MagicMock(text=analysis_text)]
-        mock_response.usage.input_tokens = 100
-        mock_response.usage.output_tokens = 50
-        return mock_response
+    """smoke test：不实际调用 LLM，验证函数不崩溃且写入正确。"""
 
     def test_no_tool_calls(self):
         """空数据库：没有 tool_calls，应该返回全零统计。"""
@@ -199,7 +191,7 @@ class TestRunL2WorkflowSmoke(unittest.TestCase):
         db.close()
 
     def test_two_similar_sessions_form_cluster(self):
-        """两个相似序列应该被聚成 1 个聚类，并调用 Sonnet。"""
+        """两个相似序列应该被聚成 1 个聚类，并调用 LLM。"""
         db = _make_in_memory_db()
         budget = _make_budget(db)
 
@@ -207,22 +199,17 @@ class TestRunL2WorkflowSmoke(unittest.TestCase):
         _insert_tool_calls(db, "session-A", ["Read", "Bash", "Edit", "Bash", "Write"])
         _insert_tool_calls(db, "session-B", ["Read", "Bash", "Edit", "Write"])
 
-        # mock Anthropic API
+        # mock call_llm
         analysis_json = json.dumps({
             "description": "读取文件、执行命令、编辑文件的典型工作流",
             "is_skill_candidate": True,
             "skill_name": "read-edit-workflow",
             "skill_trigger_scenario": "修改代码后验证结果",
         })
-        mock_response = self._make_mock_anthropic_response(analysis_json)
 
-        with patch("anthropic.Anthropic") as MockAnthropicClass:
-            mock_client = MagicMock()
-            MockAnthropicClass.return_value = mock_client
-            mock_client.messages.create.return_value = mock_response
-
-            with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test-key"}):
-                stats = run_l2_workflow(db, budget, similarity_threshold=0.5)
+        with patch("cc_mirror.l2_workflow.call_llm", new_callable=AsyncMock) as mock_call_llm:
+            mock_call_llm.return_value = (analysis_json, 0.0001)
+            stats = run_l2_workflow(db, budget, similarity_threshold=0.5)
 
         # 应该找到 1 个聚类
         self.assertEqual(stats["clusters_found"], 1)
@@ -247,8 +234,7 @@ class TestRunL2WorkflowSmoke(unittest.TestCase):
         _insert_tool_calls(db, "session-X", ["Read", "Read", "Read", "Read"])
         _insert_tool_calls(db, "session-Y", ["Bash", "Bash", "Bash", "Bash"])
 
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test-key"}):
-            stats = run_l2_workflow(db, budget, similarity_threshold=0.8)
+        stats = run_l2_workflow(db, budget, similarity_threshold=0.8)
 
         # 相似度 = 0，阈值 0.8，两个 session 进不了同一聚类
         # 每个聚类只有 1 个 session → 全部被过滤
@@ -288,8 +274,7 @@ class TestRunL2WorkflowSmoke(unittest.TestCase):
         _insert_tool_calls(db, "session-P", ["Read", "Edit", "Bash", "Write", "Bash"])
         _insert_tool_calls(db, "session-Q", ["Read", "Edit", "Write", "Bash"])
 
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test-key"}):
-            stats = run_l2_workflow(db, budget, similarity_threshold=0.5)
+        stats = run_l2_workflow(db, budget, similarity_threshold=0.5)
 
         # LLM 被跳过，但聚类可能仍然写入（description=None）
         self.assertEqual(stats["llm_calls"], 0)
@@ -371,7 +356,7 @@ class TestRunL2RepeatedPromptsSmoke(unittest.TestCase):
         self._insert_repeated_prompt(db, "请用中文回复", 5)
         self._insert_repeated_prompt(db, "只改这一行，不要改其他的", 4)
 
-        # mock Sonnet 返回
+        # mock call_llm 返回
         mock_results = [
             {
                 "text": "请用中文回复",
@@ -386,15 +371,10 @@ class TestRunL2RepeatedPromptsSmoke(unittest.TestCase):
                 "suggestion_content": "在 CLAUDE.md 加：修改时遵循最小改动原则",
             },
         ]
-        mock_response = self._make_mock_response(mock_results)
 
-        with patch("anthropic.Anthropic") as MockAnthropicClass:
-            mock_client = MagicMock()
-            MockAnthropicClass.return_value = mock_client
-            mock_client.messages.create.return_value = mock_response
-
-            with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test-key"}):
-                stats = run_l2_repeated_prompts(db, budget)
+        with patch("cc_mirror.l2_repeated_prompts.call_llm", new_callable=AsyncMock) as mock_call_llm:
+            mock_call_llm.return_value = (json.dumps(mock_results, ensure_ascii=False), 0.0002)
+            stats = run_l2_repeated_prompts(db, budget)
 
         self.assertEqual(stats["analyzed"], 2)
         self.assertEqual(stats["suggestions_generated"], 2)  # 两条都有 CLAUDE.md 建议
@@ -426,31 +406,24 @@ class TestRunL2RepeatedPromptsSmoke(unittest.TestCase):
                 "suggestion_content": "",
             }
         ]
-        mock_response = self._make_mock_response(mock_results)
 
-        with patch("anthropic.Anthropic") as MockAnthropicClass:
-            mock_client = MagicMock()
-            MockAnthropicClass.return_value = mock_client
-            mock_client.messages.create.return_value = mock_response
-
-            with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test-key"}):
-                stats = run_l2_repeated_prompts(db, budget)
+        with patch("cc_mirror.l2_repeated_prompts.call_llm", new_callable=AsyncMock) as mock_call_llm:
+            mock_call_llm.return_value = (json.dumps(mock_results, ensure_ascii=False), 0.0001)
+            stats = run_l2_repeated_prompts(db, budget)
 
         self.assertEqual(stats["analyzed"], 1)
         self.assertEqual(stats["suggestions_generated"], 0)  # none 不计
         db.close()
 
-    def test_no_api_key_returns_zero(self):
-        """没有 API key 时，分析失败，返回全零统计。"""
+    def test_llm_failure_returns_zero(self):
+        """LLM 调用失败时，分析失败，返回全零统计。"""
         db = _make_in_memory_db()
         budget = _make_budget(db)
 
         self._insert_repeated_prompt(db, "请帮我看看这个错误", 3)
 
-        # 清除环境变量
-        env = {k: v for k, v in __import__("os").environ.items()
-               if k not in ("ANTHROPIC_API_KEY", "TOWOW_ANTHROPIC_KEY")}
-        with patch.dict("os.environ", env, clear=True):
+        with patch("cc_mirror.l2_repeated_prompts.call_llm", new_callable=AsyncMock) as mock_call_llm:
+            mock_call_llm.side_effect = RuntimeError("调用失败")
             stats = run_l2_repeated_prompts(db, budget)
 
         self.assertEqual(stats["analyzed"], 0)

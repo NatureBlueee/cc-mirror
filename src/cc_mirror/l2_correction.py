@@ -16,34 +16,27 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import sqlite3
 import sys
 import time
 from typing import Any
 
 from .budget import BudgetController
+from .llm import call_llm
 
 
 # ---------------------------------------------------------------------------
 # 常量
 # ---------------------------------------------------------------------------
 
-# 使用的模型
-_MODEL = "claude-sonnet-4-6"
+# 使用的模型（传给 call_llm 的 model 参数）
+_MODEL = "sonnet"
 
 # 上下文：最多取前几条 assistant 消息
 _MAX_CONTEXT_ASSISTANT_MSGS = 3
 
 # 每条 assistant 消息的最大字符数（截断控制 token）
 _ASSISTANT_TEXT_MAX_CHARS = 500
-
-# max_tokens：给 JSON 响应留足空间，同时避免截断
-_MAX_TOKENS = 512
-
-# Sonnet 4.6 定价（每 1M token，美元）
-_PRICE_INPUT_PER_M  = 3.0
-_PRICE_OUTPUT_PER_M = 15.0
 
 
 # ---------------------------------------------------------------------------
@@ -246,18 +239,6 @@ def _write_correction(
 
 
 # ---------------------------------------------------------------------------
-# 成本计算
-# ---------------------------------------------------------------------------
-
-def _calc_cost(input_tokens: int, output_tokens: int) -> float:
-    """根据 Sonnet 4.6 定价计算成本（美元）。"""
-    return (
-        input_tokens  * _PRICE_INPUT_PER_M  / 1_000_000
-        + output_tokens * _PRICE_OUTPUT_PER_M / 1_000_000
-    )
-
-
-# ---------------------------------------------------------------------------
 # 单条任务处理（async）
 # ---------------------------------------------------------------------------
 
@@ -266,7 +247,6 @@ async def _process_one(
     db: sqlite3.Connection,
     budget: BudgetController,
     semaphore: asyncio.Semaphore,
-    client,  # anthropic.AsyncAnthropic
 ) -> dict[str, Any]:
     """
     处理单条候选纠正消息。
@@ -300,11 +280,7 @@ async def _process_one(
             t_start = time.monotonic()
             for _attempt in range(4):
                 try:
-                    response = await client.messages.create(
-                        model=_MODEL,
-                        max_tokens=_MAX_TOKENS,
-                        messages=[{"role": "user", "content": prompt}],
-                    )
+                    raw_text, cost = await call_llm(prompt, model=_MODEL)
                     break
                 except Exception as _e:
                     if "429" in str(_e) and _attempt < 3:
@@ -314,24 +290,17 @@ async def _process_one(
                     raise
             duration_ms = int((time.monotonic() - t_start) * 1000)
 
-            # 提取 token 数和成本
-            usage = response.usage
-            input_tokens  = usage.input_tokens
-            output_tokens = usage.output_tokens
-            cost = _calc_cost(input_tokens, output_tokens)
-
-            # 记录到 llm_calls 表
+            # 记录到 llm_calls 表（token 数由 CLI 路径省略，填 0 作为占位）
             budget.record_call(
                 stage="L2",
                 model=_MODEL,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
+                input_tokens=0,
+                output_tokens=0,
                 cost_usd=cost,
                 duration_ms=duration_ms,
             )
 
             # 解析响应
-            raw_text = response.content[0].text if response.content else ""
             parsed = _parse_llm_response(raw_text)
 
             if parsed is None:
@@ -416,25 +385,11 @@ async def run_l2_corrections(
         print("[l2] 全部已处理，跳过", file=sys.stderr)
         return stats
 
-    # 获取 API key
-    api_key = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("TOWOW_ANTHROPIC_API_KEY")
-    if not api_key:
-        raise EnvironmentError(
-            "未找到 ANTHROPIC_API_KEY 或 TOWOW_ANTHROPIC_API_KEY 环境变量"
-        )
-
-    # 导入 anthropic（延迟导入，避免 budget.py 等无 LLM 模块也必须安装）
-    try:
-        import anthropic
-    except ImportError as e:
-        raise ImportError("请安装 anthropic 包: pip install anthropic") from e
-
-    client = anthropic.AsyncAnthropic(api_key=api_key)
     semaphore = asyncio.Semaphore(parallelism)
 
     # 并发处理
     tasks = [
-        _process_one(candidate, db, budget, semaphore, client)
+        _process_one(candidate, db, budget, semaphore)
         for candidate in to_process
     ]
     results = await asyncio.gather(*tasks, return_exceptions=False)

@@ -47,7 +47,16 @@ Run 'cc-mirror analyze' to proceed.
 
 ### Step 2：完整分析（Sonnet + Opus，$1-5）
 
+**依赖**：已安装 Claude Code（即 `claude` 命令可用）。
+
 ```bash
+cc-mirror analyze --output ./mirror-output/
+```
+
+如果没有 Claude Code，使用 anthropic SDK 作为 fallback：
+
+```bash
+pip install "cc-mirror[api]"
 export ANTHROPIC_API_KEY=sk-ant-...
 cc-mirror analyze --output ./mirror-output/
 ```
@@ -122,7 +131,8 @@ report.html + share-card.html
 
 | 功能 | 说明 |
 |------|------|
-| scan / analyze / suggest-rules | 已内置 click + anthropic + jinja2 |
+| scan | 已内置 click + jinja2，无需 LLM |
+| analyze / suggest-rules | 需要 Claude Code（`claude` 命令）或 `pip install "cc-mirror[api]"` + `ANTHROPIC_API_KEY` |
 | PNG 截图（可选）| `pip install "cc-mirror[screenshot]"` 后需运行 `playwright install chromium` |
 
 ---
@@ -130,7 +140,7 @@ report.html + share-card.html
 ## 隐私
 
 - **所有分析在本机完成**，不上传任何数据
-- LLM 调用使用你自己的 API key（`ANTHROPIC_API_KEY`）
+- LLM 调用通过 Claude Code CLI 或你自己的 API key（`ANTHROPIC_API_KEY`）
 - 分享卡片不包含项目名、代码片段、session ID 等敏感信息
 
 ---

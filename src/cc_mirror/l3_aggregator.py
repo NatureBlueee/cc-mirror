@@ -18,8 +18,8 @@ l3_aggregator.py — CC Mirror L3 聚合层
 
 from __future__ import annotations
 
+import asyncio
 import json
-import os
 import sqlite3
 import sys
 import time
@@ -29,29 +29,17 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from cc_mirror.budget import BudgetController
 
-# 模块级导入 anthropic（延迟不可 mock），不安装时为 None
-try:
-    import anthropic
-except ImportError:
-    anthropic = None  # type: ignore[assignment]
+from cc_mirror.llm import call_llm
 
 # ---------------------------------------------------------------------------
 # 常量
 # ---------------------------------------------------------------------------
 
 # L3a 用 Opus：生成规则是高价值任务，值得用最强模型
-_MODEL_OPUS = "claude-opus-4-6"
+_MODEL_OPUS = "opus"
 
 # L3b/L3c 用 Sonnet：批量 Skill 建议，节省预算
-_MODEL_SONNET = "claude-sonnet-4-6"
-
-# Opus 定价（每百万 token，美元）
-_OPUS_PRICE_INPUT_PER_M  = 15.0
-_OPUS_PRICE_OUTPUT_PER_M = 75.0
-
-# Sonnet 定价（每百万 token，美元）
-_SONNET_PRICE_INPUT_PER_M  = 3.0
-_SONNET_PRICE_OUTPUT_PER_M = 15.0
+_MODEL_SONNET = "sonnet"
 
 # corrections 置信度阈值（只处理 >= 此值的记录）
 _MIN_CONFIDENCE = 0.7
@@ -69,27 +57,6 @@ _SONNET_MAX_TOKENS = 2048
 # ---------------------------------------------------------------------------
 # 工具函数
 # ---------------------------------------------------------------------------
-
-def _get_api_key() -> str | None:
-    """从环境变量读取 API key（优先 ANTHROPIC_API_KEY，fallback TOWOW_ANTHROPIC_API_KEY）。"""
-    return os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("TOWOW_ANTHROPIC_API_KEY")
-
-
-def _calc_opus_cost(input_tokens: int, output_tokens: int) -> float:
-    """计算 Opus 调用成本（美元）。"""
-    return (
-        input_tokens  * _OPUS_PRICE_INPUT_PER_M  / 1_000_000
-        + output_tokens * _OPUS_PRICE_OUTPUT_PER_M / 1_000_000
-    )
-
-
-def _calc_sonnet_cost(input_tokens: int, output_tokens: int) -> float:
-    """计算 Sonnet 调用成本（美元）。"""
-    return (
-        input_tokens  * _SONNET_PRICE_INPUT_PER_M  / 1_000_000
-        + output_tokens * _SONNET_PRICE_OUTPUT_PER_M / 1_000_000
-    )
-
 
 def _strip_code_fence(text: str) -> str:
     """去除 Markdown 代码块包裹（```...```），返回纯内容。"""
@@ -180,54 +147,31 @@ def generate_rules(db: sqlite3.Connection, budget: "BudgetController") -> str:
 - [规则1]
 - [规则2]
 
-## 工作流规则  
+## 工作流规则
 - [规则1]"""
 
-    # 检查 anthropic 是否可用
-    if anthropic is None:
-        print("[l3a] anthropic 包未安装，跳过规则生成", file=sys.stderr)
-        return ""
-
-    # 检查 API key
-    api_key = _get_api_key()
-    if not api_key:
-        print("[l3a] 未找到 ANTHROPIC_API_KEY / TOWOW_ANTHROPIC_API_KEY，跳过规则生成", file=sys.stderr)
-        return ""
-
     try:
-        client = anthropic.Anthropic(api_key=api_key)
-
         t0 = time.time()
-        response = client.messages.create(
-            model=_MODEL_OPUS,
-            max_tokens=_OPUS_MAX_TOKENS,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        raw_text, cost_usd = asyncio.run(call_llm(prompt, model=_MODEL_OPUS))
         duration_ms = int((time.time() - t0) * 1000)
 
-        usage = response.usage
-        input_tokens  = usage.input_tokens
-        output_tokens = usage.output_tokens
-        cost_usd = _calc_opus_cost(input_tokens, output_tokens)
-
-        # 记录调用
+        # 记录调用（token 数由 CLI 路径省略，填 0 作为占位）
         budget.record_call(
             stage="L3",
             model=_MODEL_OPUS,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
+            input_tokens=0,
+            output_tokens=0,
             cost_usd=cost_usd,
             duration_ms=duration_ms,
         )
 
-        raw_text = response.content[0].text if response.content else ""
         result = _strip_code_fence(raw_text)
 
-        print(f"[l3a] Opus 调用完成（cost=${cost_usd:.4f}，{input_tokens}→{output_tokens} tokens）", file=sys.stderr)
+        print(f"[l3a] Opus 调用完成（cost=${cost_usd:.4f}）", file=sys.stderr)
         return result
 
     except Exception as e:
-        print(f"[l3a] Opus API 调用失败: {e}", file=sys.stderr)
+        print(f"[l3a] Opus 调用失败: {e}", file=sys.stderr)
         return ""
 
 
@@ -310,51 +254,28 @@ def generate_skill_suggestions(db: sqlite3.Connection, budget: "BudgetController
 1. ...
 2. ..."""
 
-    # 检查 anthropic 是否可用
-    if anthropic is None:
-        print("[l3b] anthropic 包未安装，跳过 Skill 建议生成", file=sys.stderr)
-        return ""
-
-    # 检查 API key
-    api_key = _get_api_key()
-    if not api_key:
-        print("[l3b] 未找到 ANTHROPIC_API_KEY / TOWOW_ANTHROPIC_API_KEY，跳过 Skill 建议生成", file=sys.stderr)
-        return ""
-
     try:
-        client = anthropic.Anthropic(api_key=api_key)
-
         t0 = time.time()
-        response = client.messages.create(
-            model=_MODEL_SONNET,
-            max_tokens=_SONNET_MAX_TOKENS,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        raw_text, cost_usd = asyncio.run(call_llm(prompt, model=_MODEL_SONNET))
         duration_ms = int((time.time() - t0) * 1000)
 
-        usage = response.usage
-        input_tokens  = usage.input_tokens
-        output_tokens = usage.output_tokens
-        cost_usd = _calc_sonnet_cost(input_tokens, output_tokens)
-
-        # 记录调用
+        # 记录调用（token 数由 CLI 路径省略，填 0 作为占位）
         budget.record_call(
             stage="L3",
             model=_MODEL_SONNET,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
+            input_tokens=0,
+            output_tokens=0,
             cost_usd=cost_usd,
             duration_ms=duration_ms,
         )
 
-        raw_text = response.content[0].text if response.content else ""
         result = _strip_code_fence(raw_text)
 
-        print(f"[l3b] Sonnet 调用完成（cost=${cost_usd:.4f}，{input_tokens}→{output_tokens} tokens）", file=sys.stderr)
+        print(f"[l3b] Sonnet 调用完成（cost=${cost_usd:.4f}）", file=sys.stderr)
         return result
 
     except Exception as e:
-        print(f"[l3b] Sonnet API 调用失败: {e}", file=sys.stderr)
+        print(f"[l3b] Sonnet 调用失败: {e}", file=sys.stderr)
         return ""
 
 
@@ -552,18 +473,8 @@ def generate_synthesis(db: sqlite3.Connection, budget: "BudgetController") -> st
     输入给 Opus 的是全局视图：会话总量、时间跨度、纠正分布、重复工作流、工具使用模式。
     输出是一段有上下文的综合分析，不是条目列表。
 
-    预算不足或 API 失败时返回空字符串（不崩溃）。
+    预算不足或调用失败时返回空字符串（不崩溃）。
     """
-    # ---- 检查前置条件 ----
-    if anthropic is None:
-        print("[l3d] anthropic 包未安装，跳过综合洞察", file=sys.stderr)
-        return ""
-
-    api_key = _get_api_key()
-    if not api_key:
-        print("[l3d] 未找到 ANTHROPIC_API_KEY / TOWOW_ANTHROPIC_API_KEY，跳过综合洞察", file=sys.stderr)
-        return ""
-
     # ---- 收集全局数据 ----
     try:
         # 基础数字
@@ -678,38 +589,27 @@ def generate_synthesis(db: sqlite3.Connection, budget: "BudgetController") -> st
     print(f"[l3d] 准备调用 Opus 生成综合洞察（sessions={sessions}, corrections={confirmed}）", file=sys.stderr)
 
     try:
-        client = anthropic.Anthropic(api_key=api_key)
-
         t0 = time.time()
-        response = client.messages.create(
-            model=_MODEL_OPUS,
-            max_tokens=_OPUS_SYNTHESIS_MAX_TOKENS,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        raw_text, cost_usd = asyncio.run(call_llm(prompt, model=_MODEL_OPUS))
         duration_ms = int((time.time() - t0) * 1000)
 
-        usage = response.usage
-        input_tokens = usage.input_tokens
-        output_tokens = usage.output_tokens
-        cost_usd = _calc_opus_cost(input_tokens, output_tokens)
-
+        # 记录调用（token 数由 CLI 路径省略，填 0 作为占位）
         budget.record_call(
             stage="L3",
             model=_MODEL_OPUS,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
+            input_tokens=0,
+            output_tokens=0,
             cost_usd=cost_usd,
             duration_ms=duration_ms,
         )
 
-        raw_text = response.content[0].text if response.content else ""
         result = _strip_code_fence(raw_text)
 
-        print(f"[l3d] Opus 调用完成（cost=${cost_usd:.4f}，{input_tokens}→{output_tokens} tokens）", file=sys.stderr)
+        print(f"[l3d] Opus 调用完成（cost=${cost_usd:.4f}）", file=sys.stderr)
         return result
 
     except Exception as e:
-        print(f"[l3d] Opus API 调用失败: {e}", file=sys.stderr)
+        print(f"[l3d] Opus 调用失败: {e}", file=sys.stderr)
         return ""
 
 

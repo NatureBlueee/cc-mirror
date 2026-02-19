@@ -104,7 +104,7 @@ def scan(claude_dir, output, project, verbose):
 @click.option("--verbose", "-v", is_flag=True,
               help="显示详细进度")
 def analyze(claude_dir, output, budget, parallelism, project, skip_scan, db_path, verbose):
-    """完整分析：L1 扫描 → L2 检测 → L3 聚合 → 生成报告。"""
+    """完整分析：L1 扫描 → L2 检测 → L3 聚合 → 生成报告。需要 Claude Code（或 ANTHROPIC_API_KEY）。"""
     # 延迟导入：避免 CLI 启动时加载所有模块
     from cc_mirror.db import get_or_create_db
     from cc_mirror.budget import BudgetController

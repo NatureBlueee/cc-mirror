@@ -12,8 +12,8 @@ L2 阶段：一次 Sonnet 批量调用（所有 repeated_prompts 合并到一个
 
 from __future__ import annotations
 
+import asyncio
 import json
-import os
 import sqlite3
 import sys
 import time
@@ -22,16 +22,14 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from cc_mirror.budget import BudgetController
 
+from cc_mirror.llm import call_llm
+
 # ---------------------------------------------------------------------------
 # 常量
 # ---------------------------------------------------------------------------
 
-# 分析用的 Sonnet 模型
-_MODEL = "claude-sonnet-4-6"
-
-# Sonnet 定价（每百万 token，美元）
-_PRICE_INPUT_PER_M = 3.0
-_PRICE_OUTPUT_PER_M = 15.0
+# 分析用的模型（传给 call_llm 的 model 参数）
+_MODEL = "sonnet"
 
 # 批量分析：最多取多少条 repeated_prompts
 _MAX_PROMPTS_TO_ANALYZE = 20
@@ -82,36 +80,23 @@ def _fetch_top_repeated_prompts(db: sqlite3.Connection) -> list[dict]:
 # LLM 调用
 # ---------------------------------------------------------------------------
 
-def _get_api_key() -> str | None:
-    """从环境变量读取 API key（优先 ANTHROPIC_API_KEY，fallback TOWOW_ANTHROPIC_API_KEY）。"""
-    return os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("TOWOW_ANTHROPIC_API_KEY")
-
-
 def _analyze_repeated_prompts_batch(
     prompts: list[dict],
     budget: "BudgetController",
 ) -> list[dict] | None:
     """
-    批量调用 Sonnet 分析所有重复提示（一次 API 调用）。
+    批量调用 LLM 分析所有重复提示（一次调用）。
 
     Args:
         prompts: list of {"id": int, "text": str, "occurrences": int}
         budget:  预算控制器
 
     Returns:
-        Sonnet 返回的分析 list，或 None（预算超限 / API 失败）
+        LLM 返回的分析 list，或 None（预算超限 / 调用失败）
     """
     strategy = budget.get_strategy()
     if strategy == "stop":
         print("[l2_repeated_prompts] 预算耗尽，跳过分析", file=sys.stderr)
-        return None
-
-    api_key = _get_api_key()
-    if not api_key:
-        print(
-            "[l2_repeated_prompts] 未找到 ANTHROPIC_API_KEY / TOWOW_ANTHROPIC_API_KEY",
-            file=sys.stderr,
-        )
         return None
 
     # 构造编号列表
@@ -142,37 +127,22 @@ def _analyze_repeated_prompts_batch(
 ]"""
 
     try:
-        import anthropic
-        client = anthropic.Anthropic(api_key=api_key)
-
         t0 = time.time()
-        response = client.messages.create(
-            model=_MODEL,
-            max_tokens=4096,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        raw_text, cost_usd = asyncio.run(call_llm(prompt, model=_MODEL))
         duration_ms = int((time.time() - t0) * 1000)
 
-        # token 统计 + 记录
-        usage = response.usage
-        input_tokens = usage.input_tokens
-        output_tokens = usage.output_tokens
-        cost_usd = (
-            input_tokens * _PRICE_INPUT_PER_M / 1_000_000
-            + output_tokens * _PRICE_OUTPUT_PER_M / 1_000_000
-        )
-
+        # 记录调用（token 数由 CLI 路径省略，填 0 作为占位）
         budget.record_call(
             stage="L2",
             model=_MODEL,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
+            input_tokens=0,
+            output_tokens=0,
             cost_usd=cost_usd,
             duration_ms=duration_ms,
         )
 
         # 解析响应
-        raw_text = response.content[0].text.strip()
+        raw_text = raw_text.strip()
         # 清理可能的 markdown 代码块标记
         if raw_text.startswith("```"):
             lines = raw_text.split("\n")
@@ -181,7 +151,7 @@ def _analyze_repeated_prompts_batch(
         results = json.loads(raw_text)
         if not isinstance(results, list):
             print(
-                f"[l2_repeated_prompts] Sonnet 返回格式非 list: {type(results)}",
+                f"[l2_repeated_prompts] LLM 返回格式非 list: {type(results)}",
                 file=sys.stderr,
             )
             return None
@@ -189,10 +159,10 @@ def _analyze_repeated_prompts_batch(
         return results
 
     except json.JSONDecodeError as e:
-        print(f"[l2_repeated_prompts] Sonnet 响应 JSON 解析失败: {e}", file=sys.stderr)
+        print(f"[l2_repeated_prompts] LLM 响应 JSON 解析失败: {e}", file=sys.stderr)
         return None
     except Exception as e:
-        print(f"[l2_repeated_prompts] Sonnet API 调用失败: {e}", file=sys.stderr)
+        print(f"[l2_repeated_prompts] LLM 调用失败: {e}", file=sys.stderr)
         return None
 
 
