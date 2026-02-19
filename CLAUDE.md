@@ -35,7 +35,7 @@ mirror-output/report.html + share-card.html + share-card.png
 | Phase 0 | L1 解析器 + `cc-mirror scan` 命令 | **✅ 验收通过** (commit e1da72e) |
 | Phase 1 | L2 检测 + L3 聚合 + markdown 输出 | **✅ 验收通过** (85/85 测试) |
 | Phase 2 | L4 HTML 报告 + 分享卡片 | **✅ 验收通过** (126/126 测试, commit d126674) |
-| Phase 3 | 打包发布（pip + uvx） | **🚀 下一步** |
+| Phase 3 | 打包发布（pip + uvx） | **✅ 验收通过** (commit b119416) |
 
 **Phase 2 实测数字（Towow 项目，$1.08 总成本）**：
 - L3d synthesis: 综合叙事 300 字（"架构师+执行监督者"画像）
@@ -55,7 +55,9 @@ mirror-output/report.html + share-card.html + share-card.png
 - User text messages: 1,817 | Correction candidates: 66 (**3.6%** of text messages)
 - 32 个文件跳过（无有效 session_id，通常是 compact-only 文件）
 
-**下一步**：Phase 3 — 打包发布（README + pip + uvx）
+**GitHub**: https://github.com/NatureBlueee/cc-mirror
+**安装**: `uvx --from git+https://github.com/NatureBlueee/cc-mirror cc-mirror`
+**下一步**: PyPI 发布（可选），或继续扩展功能
 
 ---
 
