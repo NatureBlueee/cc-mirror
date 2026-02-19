@@ -56,8 +56,9 @@ mirror-output/report.html + share-card.html + share-card.png
 - 32 个文件跳过（无有效 session_id，通常是 compact-only 文件）
 
 **GitHub**: https://github.com/NatureBlueee/cc-mirror
-**安装**: `uvx --from git+https://github.com/NatureBlueee/cc-mirror cc-mirror`
-**下一步**: PyPI 发布（可选），或继续扩展功能
+**PyPI**: https://pypi.org/project/cc-mirror/
+**安装**: `uvx cc-mirror` 或 `pip install cc-mirror`
+**下一步**: 收集用户反馈，按需迭代
 
 ---
 

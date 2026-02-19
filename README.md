@@ -12,12 +12,12 @@
 ## 快速开始
 
 ```bash
-# 无需安装，从 GitHub 直接运行（推荐）
-uvx --from git+https://github.com/NatureBlueee/cc-mirror cc-mirror scan
-uvx --from git+https://github.com/NatureBlueee/cc-mirror cc-mirror analyze
+# 无需安装，直接运行（推荐）
+uvx cc-mirror scan
+uvx cc-mirror analyze
 
 # 或 pip 安装
-pip install "cc-mirror @ git+https://github.com/NatureBlueee/cc-mirror"
+pip install cc-mirror
 cc-mirror scan
 cc-mirror analyze
 ```
